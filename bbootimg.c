@@ -5,6 +5,7 @@
 
 #include "libbootimg.h"
 
+#define ACT_HELP    0
 #define ACT_EXTRACT 1
 #define ACT_UPDATE  2
 #define ACT_CREATE  3
@@ -125,7 +126,7 @@ static int extract_bootimg(struct bbootimg_info *i)
     }
 
     const char *ramdisk = i->fname_ramdisk ? i->fname_ramdisk : "initrd.img";
-    printf("extracting kernel in %s\n", ramdisk);
+    printf("extracting ramdisk in %s\n", ramdisk);
     res = libbootimg_dump_ramdisk(&i->img, ramdisk);
     if(res < 0)
     {
@@ -330,7 +331,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    return execute_action(&info);
+    if(info.act != ACT_HELP)
+        return execute_action(&info);
+
 exit_help:
     libbootimg_destroy(&info.img);
     print_help(argv[0]);
