@@ -1,0 +1,20 @@
+# Travis-CI Build for libbootimg
+# see travis-ci.org for details
+
+language: c
+
+compiler:
+  - gcc
+  - clang
+
+matrix:
+ include:
+   - compiler: i586-mingw32msvc-gcc
+
+script:
+ - make
+
+# Only watch the master
+branches:
+ only:
+   - master

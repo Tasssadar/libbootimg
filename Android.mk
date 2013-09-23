@@ -1,0 +1,22 @@
+# bbootimg
+LOCAL_PATH:= $(call my-dir)
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES:= bbootimg.c libbootimg.c
+LOCAL_MODULE:= bbootimg
+LOCAL_MODULE_TAGS := eng
+
+LOCAL_FORCE_STATIC_EXECUTABLE := true
+LOCAL_MODULE_PATH := $(TARGET_OUT_OPTIONAL_EXECUTABLES)
+LOCAL_UNSTRIPPED_PATH := $(TARGET_OUT_EXECUTABLES_UNSTRIPPED)
+
+LOCAL_STATIC_LIBRARIES := libc
+
+include $(BUILD_EXECUTABLE)
+
+# libbootimg
+include $(CLEAR_VARS)
+LOCAL_SRC_FILES := libbootimg.c
+LOCAL_MODULE := libbootimg
+LOCAL_MODULE_TAGS := eng
+include $(BUILD_STATIC_LIBRARY)
