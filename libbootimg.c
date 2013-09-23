@@ -22,7 +22,7 @@ static inline unsigned align_size(unsigned size, unsigned page_size)
 void libbootimg_init_new(struct bootimg *img)
 {
     memset(img, 0, sizeof(struct bootimg));
-    strcpy((char*)img->hdr.magic, BOOT_MAGIC);
+    memcpy(img->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
     img->hdr.page_size = DEFAULT_PAGE_SIZE;
 }
 
