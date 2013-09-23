@@ -396,17 +396,17 @@ int libbootimg_load_config_line(struct bootimg *b, char *line)
     n_to_cmp = name_e-s;
 
     if(strncmp("bootsize", s, n_to_cmp) == 0)
-        b->size = strtol(arg_s, NULL, 16);
+        b->size = strtoll(arg_s, NULL, 16);
     else if(strncmp("pagesize", s, n_to_cmp) == 0)
-        b->hdr.page_size = strtol(arg_s, NULL, 16);
+        b->hdr.page_size = strtoll(arg_s, NULL, 16);
     else if(strncmp("kerneladdr", s, n_to_cmp) == 0)
-        b->hdr.kernel_addr = strtol(arg_s, NULL, 16);
+        b->hdr.kernel_addr = strtoll(arg_s, NULL, 16);
     else if(strncmp("ramdiskaddr", s, n_to_cmp) == 0)
-        b->hdr.ramdisk_addr = strtol(arg_s, NULL, 16);
+        b->hdr.ramdisk_addr = strtoll(arg_s, NULL, 16);
     else if(strncmp("secondaddr", s, n_to_cmp) == 0)
-        b->hdr.second_addr = strtol(arg_s, NULL, 16);
+        b->hdr.second_addr = strtoll(arg_s, NULL, 16);
     else if(strncmp("tagsaddr", s, n_to_cmp) == 0)
-        b->hdr.tags_addr = strtol(arg_s, NULL, 16);
+        b->hdr.tags_addr = strtoll(arg_s, NULL, 16);
     else if(strncmp("name", s, n_to_cmp) == 0)
         strncpy((char*)b->hdr.name, arg_s, BOOT_NAME_SIZE);
     else if(strncmp("cmdline", s, n_to_cmp) == 0)
