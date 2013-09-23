@@ -150,6 +150,45 @@ static int extract_bootimg(struct bbootimg_info *i)
     return 0;
 }
 
+static int copy_file(const char *src, const char *dst)
+{
+    FILE *in = fopen(src, "r");
+    if(!in)
+    {
+        fprintf(stderr, "Failed to open src file!\n");
+        return -1;
+    }
+
+    FILE *out = fopen(dst, "w");
+    if(!out)
+    {
+        fclose(in);
+        fprintf(stderr, "Failed to open dst file!\n");
+        return -1;
+    }
+
+    int res = -1;
+#define BUFF_SIZE (512*1024)
+    char *buff = malloc(BUFF_SIZE);
+    size_t read;
+
+    while((read = fread(buff, 1, BUFF_SIZE, in)) > 0)
+    {
+        if(fwrite(buff, 1, read, out) != read)
+        {
+            fprintf(stderr, "Failed to write data to dst file!\n");
+            goto exit;
+        }
+    }
+
+    res = 0;
+exit:
+    free(buff);
+    fclose(in);
+    fclose(out);
+    return res;
+}
+
 static int update_bootimg(struct bbootimg_info *i)
 {
     int res = -1;
@@ -212,13 +251,13 @@ static int update_bootimg(struct bbootimg_info *i)
     {
         res = -res;
         fprintf(stderr, "Failed to create boot image (%s)!\n", strerror(res));
-        remove(tmpname);
         goto exit;
     }
 
-    rename(tmpname, i->fname_img);
-    remove(tmpname);
+    copy_file(tmpname, i->fname_img);
+
 exit:
+    remove(tmpname);
     free(tmpname);
     libbootimg_destroy(&i->img);
     return res;
