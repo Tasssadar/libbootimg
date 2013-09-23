@@ -1,6 +1,10 @@
 #ifndef LIBBOOTIMG_H
 #define LIBBOOTIMG_h
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include "boot_img_hdr.h"
 
@@ -36,5 +40,9 @@ int libbootimg_write_config(struct bootimg *b, const char *dst);
 
 uint32_t libbootimg_version(void);
 const char *libbootimg_version_str(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
