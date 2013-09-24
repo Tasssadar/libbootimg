@@ -12,7 +12,7 @@ matrix:
    - compiler: i586-mingw32msvc-gcc
 
 script:
- - make
+ - cd src && make
 
 # Only watch the master
 branches:

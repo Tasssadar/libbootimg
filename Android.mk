@@ -2,7 +2,7 @@
 LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
-LOCAL_SRC_FILES:= bbootimg.c libbootimg.c
+LOCAL_SRC_FILES:= src/bbootimg.c src/libbootimg.c
 LOCAL_MODULE:= bbootimg
 LOCAL_MODULE_TAGS := eng
 
@@ -16,7 +16,7 @@ include $(BUILD_EXECUTABLE)
 
 # libbootimg
 include $(CLEAR_VARS)
-LOCAL_SRC_FILES := libbootimg.c
+LOCAL_SRC_FILES := src/libbootimg.c
 LOCAL_MODULE := libbootimg
 LOCAL_MODULE_TAGS := eng
 include $(BUILD_STATIC_LIBRARY)

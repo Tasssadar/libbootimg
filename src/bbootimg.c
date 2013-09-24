@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "libbootimg.h"
+#include "../include/libbootimg.h"
 
 #define ACT_HELP    0
 #define ACT_EXTRACT 1

@@ -8,7 +8,7 @@
 #include <limits.h>
 #include <ctype.h>
 
-#include "libbootimg.h"
+#include "../include/libbootimg.h"
 #include "version.h"
 
 #define DEFAULT_PAGE_SIZE 2048
