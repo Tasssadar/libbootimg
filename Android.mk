@@ -14,6 +14,22 @@ LOCAL_STATIC_LIBRARIES := libc
 
 include $(BUILD_EXECUTABLE)
 
+
+# bbootimg - dynamic binary for TWRP
+include $(CLEAR_VARS)
+
+LOCAL_MODULE:= bbootimg_recovery
+LOCAL_MODULE_TAGS := eng
+LOCAL_MODULE_CLASS := RECOVERY_EXECUTABLES
+LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/sbin
+LOCAL_MODULE_STEM := bbootimg
+
+LOCAL_SRC_FILES:= src/bbootimg.c src/libbootimg.c
+LOCAL_SHARED_LIBRARIES := libc
+
+include $(BUILD_EXECUTABLE)
+
+
 # libbootimg
 include $(CLEAR_VARS)
 LOCAL_SRC_FILES := src/libbootimg.c
