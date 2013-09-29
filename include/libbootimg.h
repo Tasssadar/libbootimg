@@ -15,6 +15,7 @@ struct bootimg
     uint8_t *ramdisk;
     uint8_t *second;
     uint32_t size;
+    int size_is_max_only;
 };
 
 void libbootimg_init_new(struct bootimg *img);

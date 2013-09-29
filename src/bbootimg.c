@@ -39,21 +39,22 @@ static void print_help(const char *prog_name)
     "    - ramdisk image (initrd.img)\n"
     "    - second stage image (stage2.img)\n"
     "\n"
-    "%s -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>]\n"
+    "%s -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>] [-m]\n"
     "    update current boot image with objects given in command line\n"
     "    - header informations given in arguments (several can be provided)\n"
     "    - header informations given in config file\n"
     "    - kernel image\n"
     "    - ramdisk image\n"
     "    - second stage image\n"
+    "    - -m means that bootsize is used as \"maximum\", i.e. the image will not be padded with 0 to this size\n"
     "\n"
-    "%s --create <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] -k <kernel> -r <ramdisk> [-s <secondstage>]\n"
+    "%s --create <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] -k <kernel> -r <ramdisk> [-s <secondstage>] [-m]\n"
     "    create a new image from scratch.\n"
     "    arguments are the same as for -u.\n"
     "    kernel and ramdisk are mandatory.\n"
     "\n"
     "Config params:\n"
-    "    bootsize = 0x1234                   - target size in bytes, if specified, image will always be this big (0 means ignore)\n"
+    "    bootsize = 0x1234                   - target size in B, image will always be this big  unless -m is used (0 means ignore)\n"
     "    pagesize = 0x1234                   - Page size in bytes\n"
     "    kerneladdr = 0x1234                 - kernel load address\n"
     "    ramdiskaddr = 0x1234                - ramdisk load address\n"
@@ -321,6 +322,9 @@ int main(int argc, char *argv[])
             print_help(argv[0]);
             return 0;
         }
+
+        if(strcmp("-m", argv[i]) == 0)
+            info.img.size_is_max_only = 1;
 
         if(i+1 >= argc)
             continue;

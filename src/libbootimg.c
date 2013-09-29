@@ -320,14 +320,8 @@ int libbootimg_write_img(struct bootimg *b, const char *dest)
             goto exit;
         }
 
-        to_write = (b->size - ftell(f))/b->hdr.page_size;
-        for(i = 0; i < to_write; ++i)
-            if(fwrite(blank, sizeof(char), b->hdr.page_size, f) != b->hdr.page_size)
-                goto fail;
-
-        to_write = (b->size - ftell(f))%b->hdr.page_size;
-        if(fwrite(blank, sizeof(char), to_write, f) != to_write)
-            goto fail;
+        if(b->size_is_max_only == 0)
+            ftruncate(fileno(f), b->size);
     }
 
     goto exit;
