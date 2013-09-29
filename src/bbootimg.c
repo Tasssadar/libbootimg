@@ -51,6 +51,16 @@ static void print_help(const char *prog_name)
     "    create a new image from scratch.\n"
     "    arguments are the same as for -u.\n"
     "    kernel and ramdisk are mandatory.\n"
+    "\n"
+    "Config params:\n"
+    "    bootsize = 0x1234                   - target size in bytes, if specified, image will always be this big (0 means ignore)\n"
+    "    pagesize = 0x1234                   - Page size in bytes\n"
+    "    kerneladdr = 0x1234                 - kernel load address\n"
+    "    ramdiskaddr = 0x1234                - ramdisk load address\n"
+    "    secondaddr = 0x1234                 - 2nd stage load address\n"
+    "    tagsaddr = 0x1234                   - atags address\n"
+    "    name = string without quotes        - name of the image, max 16 characters\n"
+    "    cmdline = string without quotes     - cmdline, max 512 characters\n"
     ,libbootimg_version_str(), prog_name, prog_name, prog_name, prog_name, prog_name);
 }
 
