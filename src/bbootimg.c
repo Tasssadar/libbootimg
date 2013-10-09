@@ -32,6 +32,8 @@ static void print_help(const char *prog_name)
     "\n"
     "%s -i <bootimg>    - print image information\n"
     "\n"
+    "%s -j <bootimg>    - print image information in JSON\n"
+    "\n"
     "%s -x <bootimg> [<bootimg.cfg> [<kernel> [<ramdisk> [<secondstage>]]]]\n"
     "    extract objects from boot image:\n"
     "    - config file (bootimg.cfg)\n"
@@ -62,7 +64,7 @@ static void print_help(const char *prog_name)
     "    tagsaddr = 0x1234                   - atags address\n"
     "    name = string without quotes        - name of the image, max 16 characters\n"
     "    cmdline = string without quotes     - cmdline, max 512 characters\n"
-    ,libbootimg_version_str(), prog_name, prog_name, prog_name, prog_name, prog_name);
+    ,libbootimg_version_str(), prog_name, prog_name, prog_name, prog_name, prog_name, prog_name);
 }
 
 static int print_info(const char *path)
@@ -74,13 +76,18 @@ static int print_info(const char *path)
         return 1;
     }
 
+    char name[BOOT_NAME_SIZE+1];
+    snprintf(name, sizeof(name), "%s", img.hdr.name);
+
+    img.hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
+
     printf ("\nAndroid Boot Image Info:\n\n");
     printf ("* file name = %s\n\n", path);
 
     printf ("* image size = %u bytes (%.2f MB)\n", img.size, (double)img.size/0x100000);
     printf ("  page size  = %u bytes\n\n", img.hdr.page_size);
 
-    printf ("* Boot Name = \"%s\"\n\n", img.hdr.name);
+    printf ("* Boot Name = \"%s\"\n\n", name);
 
     printf ("* kernel size       = %u bytes (%.2f MB)\n", img.hdr.kernel_size, (double)img.hdr.kernel_size/0x100000);
     printf ("  ramdisk size      = %u bytes (%.2f MB)\n", img.hdr.ramdisk_size, (double)img.hdr.ramdisk_size/0x100000);
@@ -104,6 +111,46 @@ static int print_info(const char *path)
     for (i=0; i<8; i++)
         printf ("0x%08x ", img.hdr.id[i]);
     printf ("\n\n");
+
+    libbootimg_destroy(&img);
+    return 0;
+}
+
+static int print_json(const char *path)
+{
+    struct bootimg img;
+    if(libbootimg_init_load(&img, path) < 0)
+    {
+        fprintf(stderr, "Failed to load bootimg \"%s\"!\n", path);
+        return 1;
+    }
+
+    int i;
+    char name[BOOT_NAME_SIZE+1];
+    snprintf(name, sizeof(name), "%s", img.hdr.name);
+
+    img.hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
+
+    printf("{\n");
+    printf("    \"bbootimg_version\": %u,\n", libbootimg_version());
+    printf("    \"img_size\": %u,\n", img.size);
+    printf("    \"boot_img_hdr\": {\n");
+    printf("        \"kernel_size\": %u,\n", img.hdr.kernel_size);
+    printf("        \"kernel_addr\": %u,\n", img.hdr.kernel_addr);
+    printf("        \"ramdisk_size\": %u,\n", img.hdr.ramdisk_size);
+    printf("        \"ramdisk_addr\": %u,\n", img.hdr.ramdisk_addr);
+    printf("        \"second_size\": %u,\n", img.hdr.second_size);
+    printf("        \"second_addr\": %u,\n", img.hdr.second_addr);
+    printf("        \"tags_addr\": %u,\n", img.hdr.tags_addr);
+    printf("        \"page_size\": %u,\n", img.hdr.page_size);
+    printf("        \"name\": \"%s\",\n", name);
+    printf("        \"cmdline\": \"%s\",\n", img.hdr.cmdline);
+    printf("        \"id\": [\n");
+    for(i = 0; i < 8; ++i)
+        printf("            %u%c\n", img.hdr.id[i], (i != 7) ? ',' : 0);
+    printf("        ]\n"
+           "    }\n"
+           "}\n");
 
     libbootimg_destroy(&img);
     return 0;
@@ -331,6 +378,8 @@ int main(int argc, char *argv[])
 
         if(strcmp("-i", argv[i]) == 0)
             return print_info(argv[i+1]);
+        else if(strcmp("-j", argv[i]) == 0)
+            return print_json(argv[i+1]);
 
         // actions
         if(strcmp("-x", argv[i]) == 0)
