@@ -20,6 +20,8 @@ struct bootimg
 
 void libbootimg_init_new(struct bootimg *img);
 int libbootimg_init_load(struct bootimg *img, const char *path);
+int libbootimg_init_load_parts(struct bootimg *img, const char *path,
+                               int load_kernel, int load_rd, int load_second);
 void libbootimg_destroy(struct bootimg *b);
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path);
 

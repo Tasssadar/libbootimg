@@ -28,6 +28,12 @@ void libbootimg_init_new(struct bootimg *img)
 
 int libbootimg_init_load(struct bootimg *img, const char *path)
 {
+    return libbootimg_init_load_parts(img, path, 1, 1, 1);
+}
+
+int libbootimg_init_load_parts(struct bootimg *img, const char *path,
+                               int load_kernel, int load_rd, int load_second)
+{
     int res = 0;
     long addr;
 
@@ -44,30 +50,41 @@ int libbootimg_init_load(struct bootimg *img, const char *path)
     if(!f)
         return -errno;
 
-    img->kernel = malloc(img->hdr.kernel_size);
-    img->ramdisk = malloc(img->hdr.ramdisk_size);
-    img->second = malloc(img->hdr.second_size);
+    addr = img->hdr.page_size;
 
     // Read kernel
-    addr = img->hdr.page_size;
-    if(fseek(f, addr, SEEK_SET) < 0)
-        goto fail;
+    if(load_kernel)
+    {
+        img->kernel = malloc(img->hdr.kernel_size);
 
-    if(fread(img->kernel, img->hdr.kernel_size, 1, f) != 1)
-        goto fail;
+        if(fseek(f, addr, SEEK_SET) < 0)
+            goto fail;
+
+        if(fread(img->kernel, img->hdr.kernel_size, 1, f) != 1)
+            goto fail;
+    }
+
+    addr += align_size(img->hdr.kernel_size, img->hdr.page_size);
 
     // Read ramdisk
-    addr += align_size(img->hdr.kernel_size, img->hdr.page_size);
-    if(fseek(f, addr, SEEK_SET) < 0)
-        goto fail;
+    if(load_rd)
+    {
+        img->ramdisk = malloc(img->hdr.ramdisk_size);
 
-    if(fread(img->ramdisk, img->hdr.ramdisk_size, 1, f) != 1)
-        goto fail;
+        if(fseek(f, addr, SEEK_SET) < 0)
+            goto fail;
+
+        if(fread(img->ramdisk, img->hdr.ramdisk_size, 1, f) != 1)
+            goto fail;
+    }
+
+    addr += align_size(img->hdr.ramdisk_size, img->hdr.page_size);
 
     // Read second
-    if(img->hdr.second_size > 0)
+    if(load_second && img->hdr.second_size > 0)
     {
-        addr += align_size(img->hdr.ramdisk_size, img->hdr.page_size);
+        img->second = malloc(img->hdr.second_size);
+
         if(fseek(f, addr, SEEK_SET) < 0)
             goto fail;
 
