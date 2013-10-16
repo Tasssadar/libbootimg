@@ -277,7 +277,6 @@ int libbootimg_write_img(struct bootimg *b, const char *dest)
     if(b->hdr.kernel_size == 0 || b->hdr.ramdisk_size == 0 || b->hdr.page_size < sizeof(b->hdr))
         return -EINVAL;
 
-    uint32_t i;
     int res = 0;
     FILE *f = fopen(dest, "w");
     if(!f)
