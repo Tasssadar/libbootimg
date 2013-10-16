@@ -9,7 +9,6 @@
 #include <ctype.h>
 
 #include "../include/libbootimg.h"
-#include "version.h"
 
 #define DEFAULT_PAGE_SIZE 2048
 #define MAX_PATH_LEN 4096
@@ -450,10 +449,10 @@ int libbootimg_write_config(struct bootimg *b, const char *dst)
 
 uint32_t libbootimg_version(void)
 {
-    return VERSION;
+    return LIBBOOTIMG_VERSION;
 }
 
 const char *libbootimg_version_str(void)
 {
-    return VERSION_STR;
+    return LIBBOOTIMG_VERSION_STR;
 }
