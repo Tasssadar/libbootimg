@@ -70,7 +70,7 @@ static void print_help(const char *prog_name)
 static int print_info(const char *path)
 {
     struct bootimg img;
-    if(libbootimg_init_load(&img, path) < 0)
+    if(libbootimg_init_load_parts(&img, path, 0, 0, 0) < 0)
     {
         fprintf(stderr, "Failed to load bootimg \"%s\"!\n", path);
         return 1;
@@ -119,7 +119,7 @@ static int print_info(const char *path)
 static int print_json(const char *path)
 {
     struct bootimg img;
-    if(libbootimg_init_load(&img, path) < 0)
+    if(libbootimg_init_load_parts(&img, path, 0, 0, 0) < 0)
     {
         fprintf(stderr, "Failed to load bootimg \"%s\"!\n", path);
         return 1;
