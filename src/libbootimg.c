@@ -276,7 +276,9 @@ static void fill_id_hashes(struct bootimg *b)
     b->hdr.id[4] = calc_fnv_hash(&b->hdr.ramdisk_addr, sizeof(b->hdr.ramdisk_addr));
     b->hdr.id[5] = calc_fnv_hash(&b->hdr.second_addr, sizeof(b->hdr.second_addr));
     b->hdr.id[6] = calc_fnv_hash(&b->hdr.tags_addr, sizeof(b->hdr.tags_addr));
-    b->hdr.id[7] = calc_fnv_hash(b->hdr.cmdline, strlen((char*)b->hdr.cmdline));
+
+    // cmdline is directly after name, so hash them together
+    b->hdr.id[7] = calc_fnv_hash(b->hdr.name, BOOT_NAME_SIZE + strlen((char*)b->hdr.cmdline));
 }
 
 int libbootimg_write_img(struct bootimg *b, const char *dest)
