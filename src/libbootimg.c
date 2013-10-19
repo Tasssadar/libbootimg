@@ -270,7 +270,7 @@ static void fill_id_hashes(struct bootimg *b)
 {
     b->hdr.id[0] = calc_fnv_hash(b->kernel, b->hdr.kernel_size);
     b->hdr.id[1] = calc_fnv_hash(b->ramdisk, b->hdr.ramdisk_size);
-    b->hdr.id[2] = calc_fnv_hash(b->ramdisk, b->hdr.second_size);
+    b->hdr.id[2] = calc_fnv_hash(b->second, b->hdr.second_size);
 
     b->hdr.id[3] = calc_fnv_hash(&b->hdr.kernel_addr, sizeof(b->hdr.kernel_addr));
     b->hdr.id[4] = calc_fnv_hash(&b->hdr.ramdisk_addr, sizeof(b->hdr.ramdisk_addr));
