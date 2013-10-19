@@ -399,8 +399,8 @@ int libbootimg_load_config_line(struct bootimg *b, char *line)
 
     arg_s = name_e+1;
 
-    for(--name_e; isspace(*name_e); --name_e);
-    for(++arg_s; isspace(*arg_s); ++arg_s);
+    for(; isspace(*(name_e-1)) && name_e > s; --name_e);
+    for(; isspace(*arg_s); ++arg_s);
 
     n_to_cmp = name_e-s;
 
