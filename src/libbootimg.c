@@ -124,7 +124,7 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
         if(memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
             res = 0;
         else
-            res = -ENOKEY;
+            res = -EIO;
     }
     else
         res = errno ? -errno : -EIO;
