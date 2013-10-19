@@ -147,7 +147,7 @@ static int print_json(const char *path)
     printf("        \"cmdline\": \"%s\",\n", img.hdr.cmdline);
     printf("        \"id\": [\n");
     for(i = 0; i < 8; ++i)
-        printf("            %u%c\n", img.hdr.id[i], (i != 7) ? ',' : 0);
+        printf("            %u%c\n", img.hdr.id[i], (i != 7) ? ',' : ' ');
     printf("        ]\n"
            "    }\n"
            "}\n");

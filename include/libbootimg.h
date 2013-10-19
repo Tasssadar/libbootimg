@@ -8,8 +8,8 @@ extern "C" {
 #include <stdint.h>
 #include "boot_img_hdr.h"
 
-#define LIBBOOTIMG_VERSION 0x000105 // 0xMMNNPP
-#define LIBBOOTIMG_VERSION_STR "0.1.5"
+#define LIBBOOTIMG_VERSION 0x000106 // 0xMMNNPP
+#define LIBBOOTIMG_VERSION_STR "0.1.6"
 
 struct bootimg
 {
