@@ -119,7 +119,15 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
         return -errno;
 
     int res = fread(hdr, sizeof(struct boot_img_hdr), 1, f);
-    res = res == 1 ? 0 : -errno;
+    if(res == 1)
+    {
+        if(memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
+            res = 0;
+        else
+            res = -ENOKEY;
+    }
+    else
+        res = errno ? -errno : -EIO;
 
     fclose(f);
     return res;
