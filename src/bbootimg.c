@@ -256,19 +256,6 @@ static int update_bootimg(struct bbootimg_info *i)
     strcpy(tmpname, i->fname_img);
     strcat(tmpname, ".new");
 
-    if(i->fname_cfg)
-    {
-        int line = -1;
-        printf("reading config file %s\n", i->fname_cfg);
-        res = libbootimg_load_config(&i->img, i->fname_cfg, &line);
-        if(res < 0)
-        {
-            res = -res;
-            fprintf(stderr, "Failed to load config (%s), error on line %d!\n", strerror(res), line);
-            goto exit;
-        }
-    }
-
     if(i->fname_kernel)
     {
         printf("reading kernel from %s\n", i->fname_kernel);
@@ -421,7 +408,19 @@ int main(int argc, char *argv[])
             }
         }
         else if(strcmp("-f", argv[i]) == 0)
+        {
             info.fname_cfg = argv[++i];
+            printf("reading config file %s\n", info.fname_cfg);
+
+            int line = -1;
+            int res = libbootimg_load_config(&info.img, info.fname_cfg, &line);
+            if(res < 0)
+            {
+                res = -res;
+                fprintf(stderr, "Failed to load config (%s), error on line %d!\n", strerror(res), line);
+                goto exit;
+            }
+        }
         else if(strcmp("-k", argv[i]) == 0)
             info.fname_kernel = argv[++i];
         else if(strcmp("-r", argv[i]) == 0)
@@ -439,7 +438,8 @@ int main(int argc, char *argv[])
         return execute_action(&info);
 
 exit_help:
-    libbootimg_destroy(&info.img);
     print_help(argv[0]);
+exit:
+    libbootimg_destroy(&info.img);
     return EINVAL;
 }
