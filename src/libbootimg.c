@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <limits.h>
 #include <ctype.h>
+#include <assert.h>
 
 #include "../include/libbootimg.h"
 
@@ -25,16 +26,34 @@ void libbootimg_init_new(struct bootimg *img)
     img->hdr.page_size = DEFAULT_PAGE_SIZE;
 }
 
-int libbootimg_init_load(struct bootimg *img, const char *path)
+void libbootimg_init_blob_table(struct bootimg *img)
 {
-    return libbootimg_init_load_parts(img, path, 1, 1, 1);
+    if(img->blobs)
+        return;
+
+    img->blobs = calloc(LIBBOOTIMG_BLOB_CNT, sizeof(struct bootimg_blob));
+
+#define ADD_BLOB(i, d, s) \
+    img->blobs[i].data = &d; \
+    img->blobs[i].size = &s;
+
+    ADD_BLOB(LIBBOOTIMG_BLOB_KERNEL,  img->kernel,  img->hdr.kernel_size)
+    ADD_BLOB(LIBBOOTIMG_BLOB_RAMDISK, img->ramdisk, img->hdr.ramdisk_size)
+    ADD_BLOB(LIBBOOTIMG_BLOB_SECOND,  img->second,  img->hdr.second_size)
+    ADD_BLOB(LIBBOOTIMG_BLOB_DTB,     img->dtb,     img->hdr.dt_size)
 }
 
-int libbootimg_init_load_parts(struct bootimg *img, const char *path,
-                               int load_kernel, int load_rd, int load_second)
+int libbootimg_init_load(struct bootimg *img, const char *path)
 {
+    return libbootimg_init_load_parts(img, path, LIBBOOTIMG_LOAD_ALL);
+}
+
+int libbootimg_init_load_parts(struct bootimg *img, const char *path, int load_blob_mask)
+{
+    int i;
+    FILE *f;
     int res = 0;
-    long addr;
+    long long addr;
 
     libbootimg_init_new(img);
 
@@ -45,50 +64,28 @@ int libbootimg_init_load_parts(struct bootimg *img, const char *path,
         return res;
     }
 
-    FILE *f = fopen(path, "r");
+    libbootimg_init_blob_table(img);
+
+    f = fopen(path, "r");
     if(!f)
         return -errno;
 
     addr = img->hdr.page_size;
 
-    // Read kernel
-    if(load_kernel)
+    for(i = 0; i < LIBBOOTIMG_BLOB_CNT; ++i)
     {
-        img->kernel = malloc(img->hdr.kernel_size);
+        if((load_blob_mask & (1 << i)) && *img->blobs[i].size != 0)
+        {
+            *img->blobs[i].data = malloc(*img->blobs[i].size);
 
-        if(fseek(f, addr, SEEK_SET) < 0)
-            goto fail;
+            if(fseek(f, addr, SEEK_SET) < 0)
+                goto fail;
 
-        if(fread(img->kernel, img->hdr.kernel_size, 1, f) != 1)
-            goto fail;
-    }
+            if(fread(*img->blobs[i].data, *img->blobs[i].size, 1, f) != 1)
+                goto fail;
+        }
 
-    addr += align_size(img->hdr.kernel_size, img->hdr.page_size);
-
-    // Read ramdisk
-    if(load_rd)
-    {
-        img->ramdisk = malloc(img->hdr.ramdisk_size);
-
-        if(fseek(f, addr, SEEK_SET) < 0)
-            goto fail;
-
-        if(fread(img->ramdisk, img->hdr.ramdisk_size, 1, f) != 1)
-            goto fail;
-    }
-
-    addr += align_size(img->hdr.ramdisk_size, img->hdr.page_size);
-
-    // Read second
-    if(load_second && img->hdr.second_size > 0)
-    {
-        img->second = malloc(img->hdr.second_size);
-
-        if(fseek(f, addr, SEEK_SET) < 0)
-            goto fail;
-
-        if(fread(img->second, img->hdr.second_size, 1, f) != 1)
-            goto fail;
+        addr += align_size(*img->blobs[i].size, img->hdr.page_size);
     }
 
     fseek(f, 0, SEEK_END);
@@ -108,8 +105,12 @@ void libbootimg_destroy(struct bootimg *b)
     free(b->kernel);
     free(b->ramdisk);
     free(b->second);
+    free(b->dtb);
 
-    b->kernel = b->ramdisk = b->second = NULL;
+    b->kernel = b->ramdisk = b->second = b->dtb = NULL;
+
+    free(b->blobs);
+    b->blobs = NULL;
 }
 
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
@@ -164,6 +165,13 @@ int libbootimg_dump_second(struct bootimg *b, const char *dest)
     return dump_part(b->second, b->hdr.second_size, dest);
 }
 
+int libbootimg_dump_dtb(struct bootimg *b, const char *dest)
+{
+    if(b->hdr.dt_size == 0)
+        return -ENOENT;
+    return dump_part(b->dtb, b->hdr.dt_size, dest);
+}
+
 int libbootimg_dump(struct bootimg *b, const char *dest_dir)
 {
     char dest[MAX_PATH_LEN];
@@ -183,6 +191,12 @@ int libbootimg_dump(struct bootimg *b, const char *dest_dir)
         snprintf(dest, sizeof(dest), "%s/second.img", dest_dir);
         res = libbootimg_dump_second(b, dest);
     }
+
+    if(res == 0 && b->hdr.dt_size)
+    {
+        snprintf(dest, sizeof(dest), "%s/dtb.img", dest_dir);
+        res = libbootimg_dump_dtb(b, dest);
+    }
     return res;
 }
 
@@ -194,6 +208,10 @@ static int load_part(uint8_t **data, const char *src)
 
     if(info.st_size > INT_MAX)
         return -EFBIG;
+
+    // probably /dev/null
+    if(info.st_size == 0)
+        return 0;
 
     FILE *f = fopen(src, "r");
     if(!f)
@@ -237,6 +255,14 @@ int libbootimg_load_second(struct bootimg *b, const char *src)
     return res;
 }
 
+int libbootimg_load_dtb(struct bootimg *b, const char *src)
+{
+    int res = load_part(&b->dtb, src);
+    if(res >= 0)
+        b->hdr.dt_size = res;
+    return res;
+}
+
 // 32bit FNV-1a hash algorithm
 // http://isthe.com/chongo/tech/comp/fnv/#FNV-1a
 static uint32_t calc_fnv_hash(void *data, unsigned len)
@@ -275,7 +301,9 @@ static void fill_id_hashes(struct bootimg *b)
     b->hdr.id[3] = calc_fnv_hash(&b->hdr.kernel_addr, sizeof(b->hdr.kernel_addr));
     b->hdr.id[4] = calc_fnv_hash(&b->hdr.ramdisk_addr, sizeof(b->hdr.ramdisk_addr));
     b->hdr.id[5] = calc_fnv_hash(&b->hdr.second_addr, sizeof(b->hdr.second_addr));
-    b->hdr.id[6] = calc_fnv_hash(&b->hdr.tags_addr, sizeof(b->hdr.tags_addr));
+
+    // hash tags_addr, page_size, dt_size and unused together
+    b->hdr.id[6] = calc_fnv_hash(&b->hdr.tags_addr, sizeof(b->hdr.tags_addr)*4);
 
     // cmdline is directly after name, so hash them together
     b->hdr.id[7] = calc_fnv_hash(b->hdr.name, BOOT_NAME_SIZE + strlen((char*)b->hdr.cmdline));
@@ -294,8 +322,13 @@ int libbootimg_write_img(struct bootimg *b, const char *dest)
     // make sure it ends with 0
     b->hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
 
+    // set unused field to 0 - we might not be handling something
+    // which gets turned-on by this field, like with dtb
+    b->hdr.unused = 0;
+
     fill_id_hashes(b);
 
+    int i;
     size_t to_write;
     char *blank = malloc(b->hdr.page_size);
     memset(blank, 0, b->hdr.page_size);
@@ -308,29 +341,17 @@ int libbootimg_write_img(struct bootimg *b, const char *dest)
     if(fwrite(blank, sizeof(char), to_write, f) != to_write)
         goto fail;
 
-    // write kernel
-    if(fwrite(b->kernel, b->hdr.kernel_size, 1, f) != 1)
-        goto fail;
+    libbootimg_init_blob_table(b);
 
-    to_write = align_size(b->hdr.kernel_size, b->hdr.page_size) - b->hdr.kernel_size;
-    if(fwrite(blank, sizeof(char), to_write, f) != to_write)
-        goto fail;
-
-    // write ramdisk
-    if(fwrite(b->ramdisk, b->hdr.ramdisk_size, 1, f) != 1)
-        goto fail;
-
-    to_write = align_size(b->hdr.ramdisk_size, b->hdr.page_size) - b->hdr.ramdisk_size;
-    if(fwrite(blank, sizeof(char), to_write, f) != to_write)
-        goto fail;
-
-    // write second
-    if(b->hdr.second_size != 0)
+    for(i = 0; i < LIBBOOTIMG_BLOB_CNT; ++i)
     {
-        if(fwrite(b->second, b->hdr.second_size, 1, f) != 1)
+        if(*b->blobs[i].size == 0)
+            continue;
+
+        if(fwrite(*b->blobs[i].data, *b->blobs[i].size, 1, f) != 1)
             goto fail;
 
-        to_write = align_size(b->hdr.second_size, b->hdr.page_size) - b->hdr.second_size;
+        to_write = align_size(*b->blobs[i].size, b->hdr.page_size) - *b->blobs[i].size;
         if(fwrite(blank, sizeof(char), to_write, f) != to_write)
             goto fail;
     }

@@ -18,6 +18,7 @@ struct bbootimg_info
     char *fname_kernel;
     char *fname_ramdisk;
     char *fname_second;
+    char *fname_dtb;
     char *fname_cfg;
 };
 
@@ -41,16 +42,17 @@ static void print_help(const char *prog_name)
     "    - ramdisk image (initrd.img)\n"
     "    - second stage image (stage2.img)\n"
     "\n"
-    "%s -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>] [-m]\n"
+    "%s -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>] [-d <dtb> ] [-m]\n"
     "    update current boot image with objects given in command line\n"
     "    - header informations given in arguments (several can be provided)\n"
     "    - header informations given in config file\n"
     "    - kernel image\n"
     "    - ramdisk image\n"
     "    - second stage image\n"
+    "    - device tree blob\n"
     "    - -m means that bootsize is used as \"maximum\", i.e. the image will not be padded with 0 to this size\n"
     "\n"
-    "%s --create <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] -k <kernel> -r <ramdisk> [-s <secondstage>] [-m]\n"
+    "%s --create <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] -k <kernel> -r <ramdisk> [-s <secondstage>] [-d <dtb> ] [-m]\n"
     "    create a new image from scratch.\n"
     "    arguments are the same as for -u.\n"
     "    kernel and ramdisk are mandatory.\n"
@@ -70,7 +72,7 @@ static void print_help(const char *prog_name)
 static int print_info(const char *path)
 {
     struct bootimg img;
-    int res = libbootimg_init_load_parts(&img, path, 0, 0, 0);
+    int res = libbootimg_init_load_parts(&img, path, LIBBOOTIMG_LOAD_ONLY_HDR);
     if(res < 0)
     {
         fprintf(stderr, "Failed to load bootimg \"%s\" (%s)!\n", path, strerror(-res));
@@ -94,6 +96,8 @@ static int print_info(const char *path)
     printf ("  ramdisk size      = %u bytes (%.2f MB)\n", img.hdr.ramdisk_size, (double)img.hdr.ramdisk_size/0x100000);
     if (img.hdr.second_size)
         printf ("  second stage size = %u bytes (%.2f MB)\n", img.hdr.second_size, (double)img.hdr.second_size/0x100000);
+    if (img.hdr.dt_size)
+        printf ("  device tree size  = %u bytes (%.2f MB)\n", img.hdr.dt_size, (double)img.hdr.dt_size/0x100000);
 
     printf ("\n* load addresses:\n");
     printf ("  kernel:       0x%08x\n", img.hdr.kernel_addr);
@@ -120,7 +124,7 @@ static int print_info(const char *path)
 static int print_json(const char *path)
 {
     struct bootimg img;
-    int res = libbootimg_init_load_parts(&img, path, 0, 0, 0);
+    int res = libbootimg_init_load_parts(&img, path, LIBBOOTIMG_LOAD_ONLY_HDR);
     if(res < 0)
     {
         fprintf(stderr, "Failed to load bootimg \"%s\" (%s)!\n", path, strerror(-res));
@@ -147,6 +151,7 @@ static int print_json(const char *path)
     printf("        \"page_size\": %u,\n", img.hdr.page_size);
     printf("        \"name\": \"%s\",\n", name);
     printf("        \"cmdline\": \"%s\",\n", img.hdr.cmdline);
+    printf("        \"dt_size\": %u,\n", img.hdr.dt_size);
     printf("        \"id\": [\n");
     for(i = 0; i < 8; ++i)
         printf("            %u%c\n", img.hdr.id[i], (i != 7) ? ',' : ' ');
@@ -202,6 +207,18 @@ static int extract_bootimg(struct bbootimg_info *i)
         if(res < 0)
         {
             fprintf(stderr, "Failed to extract second stage (%s)!\n", strerror(-res));
+            return -res;
+        }
+    }
+
+    if(i->img.hdr.dt_size > 0)
+    {
+        const char *dtb = i->fname_dtb ? i->fname_dtb : "dtb.img";
+        printf("extracting DTB in %s\n", dtb);
+        res = libbootimg_dump_dtb(&i->img, dtb);
+        if(res < 0)
+        {
+            fprintf(stderr, "Failed to extract DTB (%s)!\n", strerror(-res));
             return -res;
         }
     }
@@ -288,6 +305,18 @@ static int update_bootimg(struct bbootimg_info *i)
         {
             res = -res;
             fprintf(stderr, "Failed to load second stage (%s)!\n", strerror(res));
+            goto exit;
+        }
+    }
+
+    if(i->fname_dtb)
+    {
+        printf("reading device tree blob from %s\n", i->fname_dtb);
+        res = libbootimg_load_dtb(&i->img, i->fname_dtb);
+        if(res < 0)
+        {
+            res = -res;
+            fprintf(stderr, "Failed to load device tree blob (%s)!\n", strerror(res));
             goto exit;
         }
     }
@@ -384,6 +413,8 @@ int main(int argc, char *argv[])
                 info.fname_ramdisk = argv[i];
             if(++i < argc)
                 info.fname_second = argv[i];
+            if(++i < argc)
+                info.fname_dtb = argv[i];
             break;
         }
         else if(strcmp("-u", argv[i]) == 0)
@@ -427,6 +458,8 @@ int main(int argc, char *argv[])
             info.fname_ramdisk = argv[++i];
         else if(strcmp("-s", argv[i]) == 0)
             info.fname_second = argv[++i];
+        else if(strcmp("-d", argv[i]) == 0)
+            info.fname_dtb = argv[++i];
         else
         {
             fprintf(stderr, "Unknown argument: %s\n\n", argv[i]);
