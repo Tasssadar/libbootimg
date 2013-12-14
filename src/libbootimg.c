@@ -79,10 +79,21 @@ int libbootimg_init_load_parts(struct bootimg *img, const char *path, int load_b
             *img->blobs[i].data = malloc(*img->blobs[i].size);
 
             if(fseek(f, addr, SEEK_SET) < 0)
-                goto fail;
+                goto fail_errno;
 
             if(fread(*img->blobs[i].data, *img->blobs[i].size, 1, f) != 1)
-                goto fail;
+            {
+                if(feof(f))
+                {
+                    res = -EINVAL;
+                    goto fail;
+                }
+                else // IO error
+                {
+                    res = -EIO;
+                    goto fail;
+                }
+            }
         }
 
         addr += align_size(*img->blobs[i].size, img->hdr.page_size);
@@ -93,8 +104,9 @@ int libbootimg_init_load_parts(struct bootimg *img, const char *path, int load_b
 
     fclose(f);
     return 0;
-fail:
+fail_errno:
     res = -errno;
+fail:
     libbootimg_destroy(img);
     fclose(f);
     return res;
