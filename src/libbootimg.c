@@ -239,7 +239,7 @@ static int load_part(uint8_t **data, const char *src)
 
     if(fread(*data, info.st_size, 1, f) != 1)
     {
-        res = -errno;
+        res = -EIO;
         free(*data);
         *data = NULL;
     }
