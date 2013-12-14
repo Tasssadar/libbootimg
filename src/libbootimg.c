@@ -149,7 +149,12 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
 static int dump_part(uint8_t *data, unsigned len, const char *dest)
 {
     int res = 0;
-    FILE *f = fopen(dest, "w");
+    FILE *f;
+
+    if(data == NULL)
+        return -EINVAL;
+
+    f = fopen(dest, "w");
     if(!f)
         return -errno;
 
