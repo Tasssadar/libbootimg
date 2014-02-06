@@ -209,7 +209,7 @@ int libbootimg_load_dtb(struct bootimg *b, const char *src);
  * Writes boot image to a file
  * @param b pointer to struct bootimg
  * @param dest path to destination file
- * @return zero if successful, negative value from libbootimg_error if failed.
+ * @return number of bytes written to the file if successful, negative value from libbootimg_error if failed.
  */
 int libbootimg_write_img(struct bootimg *b, const char *dest);
 
@@ -217,7 +217,7 @@ int libbootimg_write_img(struct bootimg *b, const char *dest);
  * Writes boot image to a file
  * @param b pointer to struct bootimg
  * @param f pointer to FILE to write data into
- * @return zero if successful, negative value from libbootimg_error if failed.
+ * @return number of bytes written to the file if successful, negative value from libbootimg_error if failed.
  */
 int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f);
 
@@ -226,7 +226,7 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f);
  * The bootimg struct is destroyed even if this function fails.
  * @param b pointer to struct bootimg
  * @param dest path to destination file
- * @return zero if successful, negative value from libbootimg_error if failed.
+ * @return number of bytes written to the file if successful, negative value from libbootimg_error if failed.
  */
 int libbootimg_write_img_and_destroy(struct bootimg *b, const char *dest);
 
