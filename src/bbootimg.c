@@ -2,6 +2,10 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "../include/libbootimg.h"
 
@@ -10,16 +14,30 @@
 #define ACT_UPDATE  2
 #define ACT_CREATE  3
 
+static const char *default_fname_cfg = "bootimg.cfg";
+static const char *default_fname_blobs[] = {
+    "zImage",     // LIBBOOTIMG_BLOB_KERNEL
+    "initrd.img", // LIBBOOTIMG_BLOB_RAMDISK
+    "stage2.img", // LIBBOOTIMG_BLOB_SECOND
+    "dtb.img",    // LIBBOOTIMG_BLOB_DTB
+};
+
+static const char *blob_names[] = {
+    "kernel",       // LIBBOOTIMG_BLOB_KERNEL
+    "ramdisk",      // LIBBOOTIMG_BLOB_RAMDISK
+    "second stage", // LIBBOOTIMG_BLOB_SECOND
+    "DTB",          // LIBBOOTIMG_BLOB_DTB
+};
+
 struct bbootimg_info
 {
     struct bootimg img;
+    off_t img_size;
+    int size_is_max_only;
     int act;
-    char *fname_img;
-    char *fname_kernel;
-    char *fname_ramdisk;
-    char *fname_second;
-    char *fname_dtb;
-    char *fname_cfg;
+    const char *fname_img;
+    const char *fname_cfg;
+    const char *fname_blobs[LIBBOOTIMG_BLOB_CNT];
 };
 
 static void print_help(const char *prog_name)
@@ -35,7 +53,7 @@ static void print_help(const char *prog_name)
     "\n"
     "%s -j <bootimg>    - print image information in JSON\n"
     "\n"
-    "%s -x <bootimg> [<bootimg.cfg> [<kernel> [<ramdisk> [<secondstage>]]]]\n"
+    "%s -x <bootimg> [<bootimg.cfg> [<kernel> [<ramdisk> [<secondstage> [<dtb>]]]]]\n"
     "    extract objects from boot image:\n"
     "    - config file (bootimg.cfg)\n"
     "    - kernel image (zImage)\n"
@@ -69,17 +87,200 @@ static void print_help(const char *prog_name)
     ,libbootimg_version_str(), prog_name, prog_name, prog_name, prog_name, prog_name, prog_name);
 }
 
-static int print_info(const char *path)
+
+static int write_config(struct bbootimg_info *i, const char *dst)
 {
-    struct bootimg img;
-    int res = libbootimg_init_load_parts(&img, path, LIBBOOTIMG_LOAD_ONLY_HDR);
+    int res;
+    FILE *f;
+
+    f = fopen(dst, "w");
+    if(!f)
+        return -errno;
+
+    res = fprintf(f,
+        "bootsize = 0x%X\n"
+        "pagesize = 0x%X\n"
+        "kerneladdr = 0x%X\n"
+        "ramdiskaddr = 0x%X\n"
+        "secondaddr = 0x%X\n"
+        "tagsaddr = 0x%X\n"
+        "name = %s\n"
+        "cmdline = %s\n",
+        (uint32_t)i->img_size, i->img.hdr.page_size, i->img.hdr.kernel_addr, i->img.hdr.ramdisk_addr,
+        i->img.hdr.second_addr, i->img.hdr.tags_addr, i->img.hdr.name, i->img.hdr.cmdline);
+
+    fclose(f);
+    return res;
+}
+
+static void parse_config_str(char *dest, const char *arg_start, const char *arg_end, size_t maxlen)
+{
+    size_t len = 0;
+
+    if(*arg_start)
+    {
+        maxlen -= 1; // it includes the NULL
+
+        len = arg_end - arg_start;
+        if(len > maxlen)
+            len = maxlen;
+
+        strncpy(dest, arg_start, len);
+    }
+
+    dest[len] = 0;
+}
+
+static int load_config_line(struct bbootimg_info *i, const char *line)
+{
+    const char *start, *end;
+    char *name_e;
+    char *arg_s;
+    size_t n_to_cmp, len;
+
+    for(start = line; isspace(*start); ++start);
+
+    for(end = start+strlen(start); isspace(*(end-1)); --end);
+
+    if(*start == 0 || (name_e = strchr(start, '=')) == NULL)
+        return 0;
+
+    arg_s = name_e+1;
+
+    for(; isspace(*(name_e-1)) && name_e > start; --name_e);
+    for(; isspace(*arg_s); ++arg_s);
+
+    n_to_cmp = name_e - start;
+
+    if(strncmp("bootsize", start, n_to_cmp) == 0)
+        i->img_size = strtoll(arg_s, NULL, 0);
+    else if(strncmp("pagesize", start, n_to_cmp) == 0)
+        i->img.hdr.page_size = strtoll(arg_s, NULL, 0);
+    else if(strncmp("kerneladdr", start, n_to_cmp) == 0)
+        i->img.hdr.kernel_addr = strtoll(arg_s, NULL, 0);
+    else if(strncmp("ramdiskaddr", start, n_to_cmp) == 0)
+        i->img.hdr.ramdisk_addr = strtoll(arg_s, NULL, 0);
+    else if(strncmp("secondaddr", start, n_to_cmp) == 0)
+        i->img.hdr.second_addr = strtoll(arg_s, NULL, 0);
+    else if(strncmp("tagsaddr", start, n_to_cmp) == 0)
+        i->img.hdr.tags_addr = strtoll(arg_s, NULL, 0);
+    else if(strncmp("name", start, n_to_cmp) == 0)
+        parse_config_str((char*)i->img.hdr.name, arg_s, end, BOOT_NAME_SIZE);
+    else if(strncmp("cmdline", start, n_to_cmp) == 0)
+        parse_config_str((char*)i->img.hdr.cmdline, arg_s, end, BOOT_ARGS_SIZE);
+    else
+        return -1;
+    return 0;
+}
+
+static int load_config(struct bbootimg_info *i, const char *src, int *error_line)
+{
+    FILE *f;
+    int res = 0;
+    int line_num = 0;
+    char line[1024];
+
+    f = fopen(src, "r");
+    if(!f)
+        return -errno;
+
+    while(fgets(line, sizeof(line), f))
+    {
+        if(load_config_line(i, line) < 0)
+        {
+            res = -1;
+            if(error_line)
+                *error_line = line_num;
+            goto exit;
+        }
+        ++line_num;
+    }
+
+exit:
+    fclose(f);
+    return res;
+}
+
+static int load_bootimg(struct bootimg *b, const char *path)
+{
+    int res = libbootimg_init_load(b, path, LIBBOOTIMG_LOAD_ALL);
     if(res < 0)
     {
-        fprintf(stderr, "Failed to load bootimg \"%s\" (%s)!\n", path, strerror(-res));
+        fprintf(stderr, "Failed to load boot image (%s)!", libbootimg_error_str(res));
+        return -res;
+    }
+    return 0;
+}
+
+static off_t get_bootimg_size(const char *path)
+{
+    struct stat info;
+    if(stat(path, &info) < 0)
+    {
+        fprintf(stderr, "Failed to get boot image size (%s)!", strerror(errno));
+        return -1;
+    }
+
+    // If this is a block device, stat will report zero size.
+    // abootimg uses libblkid to get the correct size, but
+    // I don't wanna drag in any dependencies.
+    if(info.st_size == 0)
+    {
+        off_t size;
+        FILE *f;
+
+        f = fopen(path, "r");
+        if(!f)
+        {
+            fprintf(stderr, "Failed to get boot image size (%s)!", strerror(errno));
+            return -1;
+        }
+
+        fseek(f, 0, SEEK_END);
+        size = ftell(f);
+        fclose(f);
+
+        if(size <= 0)
+        {
+            fprintf(stderr, "Failed to get boot image size (fseek -> ftell failed, %s)!", strerror(errno));
+            return -1;
+        }
+        return size;
+    }
+    else
+    {
+        return info.st_size;
+    }
+}
+
+static void load_default_filenames(struct bbootimg_info *i)
+{
+    int x;
+
+    i->fname_cfg = default_fname_cfg;
+
+    for(x = 0; x < LIBBOOTIMG_BLOB_CNT; ++x)
+        i->fname_blobs[x] = default_fname_blobs[x];
+}
+
+static int print_info(const char *path)
+{
+    int i;
+    int res;
+    off_t size;
+    struct bootimg img;
+    char name[BOOT_NAME_SIZE+1];
+
+    res = libbootimg_init_load(&img, path, LIBBOOTIMG_LOAD_HDR_ONLY);
+    if(res < 0)
+    {
+        fprintf(stderr, "Failed to load bootimg \"%s\" (%s)!\n", path, libbootimg_error_str(res));
         return 1;
     }
 
-    char name[BOOT_NAME_SIZE+1];
+    if((size = get_bootimg_size(path)) < 0)
+        return 1;
+
     snprintf(name, sizeof(name), "%s", img.hdr.name);
 
     img.hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
@@ -87,7 +288,7 @@ static int print_info(const char *path)
     printf ("\nAndroid Boot Image Info:\n\n");
     printf ("* file name = %s\n\n", path);
 
-    printf ("* image size = %u bytes (%.2f MB)\n", img.size, (double)img.size/0x100000);
+    printf ("* image size = %ld bytes (%.2f MB)\n", size, (double)size/0x100000);
     printf ("  page size  = %u bytes\n\n", img.hdr.page_size);
 
     printf ("* Boot Name = \"%s\"\n\n", name);
@@ -112,8 +313,7 @@ static int print_info(const char *path)
         printf ("* empty cmdline\n");
 
     printf ("* id = ");
-    int i;
-    for (i=0; i<8; i++)
+    for (i = 0; i < 8; ++i)
         printf ("0x%08x ", img.hdr.id[i]);
     printf ("\n\n");
 
@@ -123,23 +323,29 @@ static int print_info(const char *path)
 
 static int print_json(const char *path)
 {
+    int i;
+    int res;
+    off_t size;
     struct bootimg img;
-    int res = libbootimg_init_load_parts(&img, path, LIBBOOTIMG_LOAD_ONLY_HDR);
+    char name[BOOT_NAME_SIZE+1];
+
+    res = libbootimg_init_load(&img, path, LIBBOOTIMG_LOAD_HDR_ONLY);
     if(res < 0)
     {
-        fprintf(stderr, "Failed to load bootimg \"%s\" (%s)!\n", path, strerror(-res));
+        fprintf(stderr, "Failed to load bootimg \"%s\" (%s)!\n", path, libbootimg_error_str(res));
         return 1;
     }
 
-    int i;
-    char name[BOOT_NAME_SIZE+1];
+    if((size = get_bootimg_size(path)) < 0)
+        return 1;
+
     snprintf(name, sizeof(name), "%s", img.hdr.name);
 
     img.hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
 
     printf("{\n");
     printf("    \"bbootimg_version\": %u,\n", libbootimg_version());
-    printf("    \"img_size\": %u,\n", img.size);
+    printf("    \"img_size\": %ld,\n", size);
     printf("    \"boot_img_hdr\": {\n");
     printf("        \"kernel_size\": %u,\n", img.hdr.kernel_size);
     printf("        \"kernel_addr\": %u,\n", img.hdr.kernel_addr);
@@ -165,61 +371,41 @@ static int print_json(const char *path)
 
 static int extract_bootimg(struct bbootimg_info *i)
 {
-    int res = libbootimg_init_load(&i->img, i->fname_img);
+    int x;
+    int res;
+    struct bootimg_blob *blob;
+
+    res = libbootimg_init_load(&i->img, i->fname_img, LIBBOOTIMG_LOAD_ALL);
     if(res < 0)
     {
-        fprintf(stderr, "Failed to load boot image (%s)!\n", strerror(-res));
+        fprintf(stderr, "Failed to load boot image (%s)!\n", libbootimg_error_str(res));
         return -res;
     }
 
-    const char *cfg = i->fname_cfg ? i->fname_cfg : "bootimg.cfg";
-    printf("writing boot image config in %s\n", cfg);
-    res = libbootimg_write_config(&i->img, cfg);
+    if((i->img_size = get_bootimg_size(i->fname_img)) < 0)
+        return -1;
+
+    printf("writing boot image config in %s\n", i->fname_cfg);
+    res = write_config(i, i->fname_cfg);
     if(res < 0)
     {
         fprintf(stderr, "Failed to write bootimg cfg (%s)!\n", strerror(-res));
         return -res;
     }
 
-    const char *kernel = i->fname_kernel ? i->fname_kernel : "zImage";
-    printf("extracting kernel in %s\n", kernel);
-    res = libbootimg_dump_kernel(&i->img, kernel);
-    if(res < 0)
+    for(x = 0; x < LIBBOOTIMG_BLOB_CNT; ++x)
     {
-        fprintf(stderr, "Failed to extract kernel (%s)!\n", strerror(-res));
-        return -res;
-    }
+        blob = &i->img.blobs[x];
 
-    const char *ramdisk = i->fname_ramdisk ? i->fname_ramdisk : "initrd.img";
-    printf("extracting ramdisk in %s\n", ramdisk);
-    res = libbootimg_dump_ramdisk(&i->img, ramdisk);
-    if(res < 0)
-    {
-        fprintf(stderr, "Failed to extract ramdisk (%s)!\n", strerror(-res));
-        return -res;
-    }
+        if(*blob->size == 0)
+            continue;
 
-    if(i->img.hdr.second_size > 0)
-    {
-        const char *second = i->fname_second ? i->fname_second : "stage2.img";
-        printf("extracting second stage in %s\n", second);
-        res = libbootimg_dump_second(&i->img, second);
+        printf("extracting %s in %s\n", blob_names[x], i->fname_blobs[x]);
+        res = libbootimg_dump_blob(blob, i->fname_blobs[x]);
         if(res < 0)
         {
-            fprintf(stderr, "Failed to extract second stage (%s)!\n", strerror(-res));
-            return -res;
-        }
-    }
-
-    if(i->img.hdr.dt_size > 0)
-    {
-        const char *dtb = i->fname_dtb ? i->fname_dtb : "dtb.img";
-        printf("extracting DTB in %s\n", dtb);
-        res = libbootimg_dump_dtb(&i->img, dtb);
-        if(res < 0)
-        {
-            fprintf(stderr, "Failed to extract DTB (%s)!\n", strerror(-res));
-            return -res;
+            fprintf(stderr, "Failed to extract %s (%s)!\n", blob_names[x], libbootimg_error_str(res));
+            return res;
         }
     }
 
@@ -227,33 +413,28 @@ static int extract_bootimg(struct bbootimg_info *i)
     return 0;
 }
 
-static int copy_file(const char *src, const char *dst)
+static int copy_file(FILE *in, const char *dst)
 {
-    FILE *in = fopen(src, "r");
-    if(!in)
-    {
-        fprintf(stderr, "Failed to open src file!\n");
-        return -1;
-    }
+#define CPY_BUFF_SIZE (512*1024)
+    FILE *out;
+    int res = -1;
+    size_t read;
+    char *buff = NULL;
 
-    FILE *out = fopen(dst, "w");
+    out = fopen(dst, "w");
     if(!out)
     {
-        fclose(in);
-        fprintf(stderr, "Failed to open dst file!\n");
+        fprintf(stderr, "Failed to open dst file (%s)!\n", strerror(errno));
         return -1;
     }
 
-    int res = -1;
-#define BUFF_SIZE (512*1024)
-    char *buff = malloc(BUFF_SIZE);
-    size_t read;
+    buff = malloc(CPY_BUFF_SIZE);
 
-    while((read = fread(buff, 1, BUFF_SIZE, in)) > 0)
+    while((read = fread(buff, 1, CPY_BUFF_SIZE, in)) > 0)
     {
         if(fwrite(buff, 1, read, out) != read)
         {
-            fprintf(stderr, "Failed to write data to dst file!\n");
+            fprintf(stderr, "Failed to write data to dst file (%s)!\n", strerror(errno));
             goto exit;
         }
     }
@@ -261,80 +442,69 @@ static int copy_file(const char *src, const char *dst)
     res = 0;
 exit:
     free(buff);
-    fclose(in);
     fclose(out);
     return res;
 }
 
 static int update_bootimg(struct bbootimg_info *i)
 {
+    int x;
     int res = -1;
-    char *tmpname = malloc(strlen(i->fname_img)+sizeof(".new"));
-    strcpy(tmpname, i->fname_img);
-    strcat(tmpname, ".new");
+    FILE *tmp = NULL;
+    struct bootimg_blob *blob;
 
-    if(i->fname_kernel)
+    for(x = 0; x < LIBBOOTIMG_BLOB_CNT; ++x)
     {
-        printf("reading kernel from %s\n", i->fname_kernel);
-        res = libbootimg_load_kernel(&i->img, i->fname_kernel);
+        if(!i->fname_blobs[x])
+            continue;
+
+        blob = &i->img.blobs[x];
+
+        printf("reading %s from %s\n", blob_names[x], i->fname_blobs[x]);
+        res = libbootimg_load_blob(blob, i->fname_blobs[x]);
         if(res < 0)
         {
-            res = -res;
-            fprintf(stderr, "Failed to load kernel (%s)!\n", strerror(res));
-            goto exit;
-        }
-    }
-
-    if(i->fname_ramdisk)
-    {
-        printf("reading ramdisk from %s\n", i->fname_ramdisk);
-        res = libbootimg_load_ramdisk(&i->img, i->fname_ramdisk);
-        if(res < 0)
-        {
-            res = -res;
-            fprintf(stderr, "Failed to load ramdisk (%s)!\n", strerror(res));
-            goto exit;
-        }
-    }
-
-    if(i->fname_second)
-    {
-        printf("reading second stage from %s\n", i->fname_second);
-        res = libbootimg_load_second(&i->img, i->fname_second);
-        if(res < 0)
-        {
-            res = -res;
-            fprintf(stderr, "Failed to load second stage (%s)!\n", strerror(res));
-            goto exit;
-        }
-    }
-
-    if(i->fname_dtb)
-    {
-        printf("reading device tree blob from %s\n", i->fname_dtb);
-        res = libbootimg_load_dtb(&i->img, i->fname_dtb);
-        if(res < 0)
-        {
-            res = -res;
-            fprintf(stderr, "Failed to load device tree blob (%s)!\n", strerror(res));
+            fprintf(stderr, "Failed to load %s (%s)!\n", blob_names[x], libbootimg_error_str(res));
             goto exit;
         }
     }
 
     printf("Writing Boot Image %s\n", i->fname_img);
-    res = libbootimg_write_img(&i->img, tmpname);
-    if(res < 0)
+
+    tmp = tmpfile();
+    if(!tmp)
     {
-        res = -res;
-        fprintf(stderr, "Failed to create boot image (%s)!\n", strerror(res));
+        fprintf(stderr, "Failed to create tmp file (%s)!\n", strerror(errno));
         goto exit;
     }
 
-    copy_file(tmpname, i->fname_img);
+    res = libbootimg_write_img_fileptr(&i->img, tmp);
+    if(res < 0)
+    {
+        fprintf(stderr, "Failed to create boot image (%s)!\n", libbootimg_error_str(res));
+        goto exit;
+    }
+
+    // bootimg size (abootimg compatibility)
+    if(i->img_size != 0)
+    {
+        if(i->img_size < ftell(tmp))
+        {
+            fprintf(stderr, "Failed to create boot image: the result image is too big\n");
+            res = -1;
+            goto exit;
+        }
+
+        if(i->size_is_max_only == 0)
+            ftruncate(fileno(tmp), i->img_size);
+    }
+
+    rewind(tmp);
+    copy_file(tmp, i->fname_img);
 
 exit:
-    remove(tmpname);
-    free(tmpname);
+    if(tmp)
+        fclose(tmp);
     libbootimg_destroy(&i->img);
     return res;
 }
@@ -349,7 +519,7 @@ static int execute_action(struct bbootimg_info *i)
             return update_bootimg(i);
         case ACT_CREATE:
         {
-            if(!i->fname_kernel || !i->fname_ramdisk)
+            if(!i->fname_blobs[LIBBOOTIMG_BLOB_KERNEL] || !i->fname_blobs[LIBBOOTIMG_BLOB_RAMDISK])
             {
                 fprintf(stderr, "You have to specify both ramdisk and kernel to create boot image!\n");
                 return EINVAL;
@@ -360,18 +530,7 @@ static int execute_action(struct bbootimg_info *i)
     return EINVAL;
 }
 
-static int load_bootimg(struct bootimg *b, const char *path)
-{
-    int res = libbootimg_init_load(b, path);
-    if(res < 0)
-    {
-        fprintf(stderr, "Failed to load boot image (%s)!", strerror(-res));
-        return -res;
-    }
-    return 0;
-}
-
-int main(int argc, char *argv[])
+int main(int argc, const char *argv[])
 {
     int i;
 
@@ -389,7 +548,7 @@ int main(int argc, char *argv[])
         }
 
         if(strcmp("-m", argv[i]) == 0)
-            info.img.size_is_max_only = 1;
+            info.size_is_max_only = 1;
 
         if(i+1 >= argc)
             continue;
@@ -402,27 +561,31 @@ int main(int argc, char *argv[])
         // actions
         if(strcmp("-x", argv[i]) == 0)
         {
+            int blob_itr;
+
+            load_default_filenames(&info);
+
             info.act = ACT_EXTRACT;
             info.fname_img = argv[++i];
 
             if(++i < argc)
                 info.fname_cfg = argv[i];
-            if(++i < argc)
-                info.fname_kernel = argv[i];
-            if(++i < argc)
-                info.fname_ramdisk = argv[i];
-            if(++i < argc)
-                info.fname_second = argv[i];
-            if(++i < argc)
-                info.fname_dtb = argv[i];
+
+            for(blob_itr = 0; ++i < argc && blob_itr < LIBBOOTIMG_BLOB_CNT; ++blob_itr)
+                info.fname_blobs[blob_itr] = argv[i];
+
             break;
         }
         else if(strcmp("-u", argv[i]) == 0)
         {
             info.act = ACT_UPDATE;
             info.fname_img = argv[++i];
-            if(load_bootimg(&info.img, info.fname_img) != 0)
+
+            if (load_bootimg(&info.img, info.fname_img) != 0)
                return -1;
+
+            if((info.img_size = get_bootimg_size(info.fname_img)) < 0)
+                return -1;
         }
         else if(strcmp("--create", argv[i]) == 0)
         {
@@ -432,7 +595,7 @@ int main(int argc, char *argv[])
         // params
         else if(strcmp("-c", argv[i]) == 0)
         {
-            if(libbootimg_load_config_line(&info.img, argv[++i]) < 0)
+            if(load_config_line(&info, argv[++i]) < 0)
             {
                 fprintf(stderr, "Invalid config option \"%s\"\n\n", argv[i]);
                 goto exit_help;
@@ -444,7 +607,7 @@ int main(int argc, char *argv[])
             printf("reading config file %s\n", info.fname_cfg);
 
             int line = -1;
-            int res = libbootimg_load_config(&info.img, info.fname_cfg, &line);
+            int res = load_config(&info, info.fname_cfg, &line);
             if(res < 0)
             {
                 res = -res;
@@ -453,13 +616,13 @@ int main(int argc, char *argv[])
             }
         }
         else if(strcmp("-k", argv[i]) == 0)
-            info.fname_kernel = argv[++i];
+            info.fname_blobs[LIBBOOTIMG_BLOB_KERNEL] = argv[++i];
         else if(strcmp("-r", argv[i]) == 0)
-            info.fname_ramdisk = argv[++i];
+            info.fname_blobs[LIBBOOTIMG_BLOB_RAMDISK] = argv[++i];
         else if(strcmp("-s", argv[i]) == 0)
-            info.fname_second = argv[++i];
+            info.fname_blobs[LIBBOOTIMG_BLOB_SECOND] = argv[++i];
         else if(strcmp("-d", argv[i]) == 0)
-            info.fname_dtb = argv[++i];
+            info.fname_blobs[LIBBOOTIMG_BLOB_DTB] = argv[++i];
         else
         {
             fprintf(stderr, "Unknown argument: %s\n\n", argv[i]);
@@ -468,7 +631,7 @@ int main(int argc, char *argv[])
     }
 
     if(info.act != ACT_HELP)
-        return execute_action(&info);
+        return execute_action(&info) == 0 ? 0 : 1;
 
 exit_help:
     print_help(argv[0]);
