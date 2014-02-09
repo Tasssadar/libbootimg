@@ -500,7 +500,7 @@ static int update_bootimg(struct bbootimg_info *i)
     }
 
     rewind(tmp);
-    copy_file(tmp, i->fname_img);
+    res = copy_file(tmp, i->fname_img);
 
 exit:
     if(tmp)
@@ -631,7 +631,7 @@ int main(int argc, const char *argv[])
     }
 
     if(info.act != ACT_HELP)
-        return execute_action(&info) == 0 ? 0 : 1;
+        return execute_action(&info) >= 0 ? 0 : 1;
 
 exit_help:
     print_help(argv[0]);
