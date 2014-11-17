@@ -1,8 +1,11 @@
 # bbootimg
 LOCAL_PATH:= $(call my-dir)
+
+bbootimg_src_file := src/bbootimg.c src/libbootimg.c
+
 include $(CLEAR_VARS)
 
-LOCAL_SRC_FILES:= src/bbootimg.c src/libbootimg.c
+LOCAL_SRC_FILES:= $(bbootimg_src_file)
 LOCAL_MODULE:= bbootimg
 LOCAL_MODULE_TAGS := eng
 
@@ -14,6 +17,14 @@ LOCAL_STATIC_LIBRARIES := libc
 
 include $(BUILD_EXECUTABLE)
 
+include $(CLEAR_VARS)
+
+LOCAL_SRC_FILES:= $(bbootimg_src_file)
+LOCAL_MODULE := bbootimge_host
+LOCAL_MODULE_STEM := bbootimg
+LOCAL_MODULE_TAGS := optional
+
+include $(BUILD_HOST_EXECUTABLE)
 
 # bbootimg - dynamic binary for TWRP
 include $(CLEAR_VARS)
