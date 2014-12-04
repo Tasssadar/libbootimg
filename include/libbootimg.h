@@ -3,7 +3,7 @@
  * @brief This file contains all public libbootimg methods, defines and structs
  */
 #ifndef LIBBOOTIMG_H
-#define LIBBOOTIMG_h
+#define LIBBOOTIMG_H
 
 #ifdef __cplusplus
 extern "C" {
