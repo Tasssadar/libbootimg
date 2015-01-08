@@ -13,8 +13,8 @@ extern "C" {
 #include <stdio.h>
 #include "boot_img_hdr.h"
 
-#define LIBBOOTIMG_VERSION 0x000201 // 0xMMNNPP
-#define LIBBOOTIMG_VERSION_STR "0.2.1"
+#define LIBBOOTIMG_VERSION 0x000202 // 0xMMNNPP
+#define LIBBOOTIMG_VERSION_STR "0.2.2"
 
 /**
  * Enum containing possible blob types in a boot image.
@@ -85,6 +85,7 @@ struct bootimg
 {
     struct boot_img_hdr hdr; /*!< Boot image header */
     struct bootimg_blob blobs[LIBBOOTIMG_BLOB_CNT]; /*!< Blobs packed in the boot image. */
+    int start_offset; /*!< Offset of the boot image structure from the start of the file. Only used when loading blobs from boot.img file. */
 };
 
 /**
@@ -109,7 +110,7 @@ int libbootimg_init_load(struct bootimg *img, const char *path, int load_blob_ma
  * Loads boot_img_hdr from file on disk
  * @param hdr pointer to boot_img_hdr structure
  * @param path path to boot.img to load header from
- * @return zero if successful, negative value from libbootimg_error if failed.
+ * @return positive offset of the header from the start of the file if successful, negative value from libbootimg_error if failed.
  */
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path);
 

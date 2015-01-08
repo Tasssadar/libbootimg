@@ -116,11 +116,13 @@ int libbootimg_init_load(struct bootimg *img, const char *path, int load_blob_ma
         return res;
     }
 
+    img->start_offset = res;
+
     f = fopen(path, "r");
     if(!f)
         return translate_errnum(errno);
 
-    addr = img->hdr.page_size;
+    addr = img->start_offset + img->hdr.page_size;
 
     for(i = 0; i < LIBBOOTIMG_BLOB_CNT; ++i)
     {
@@ -174,7 +176,7 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
     int res = 0;
     FILE *f;
     size_t i;
-    static const uint32_t known_magic_pos[] = {
+    static const int known_magic_pos[] = {
         0x0,   // default
         0x100, // HTC signed boot images
     };
@@ -191,7 +193,7 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
         {
             if(memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
             {
-                res = 0;
+                res = known_magic_pos[i];
                 break;
             }
         }
