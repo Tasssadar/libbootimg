@@ -172,18 +172,34 @@ void libbootimg_destroy(struct bootimg *b)
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
 {
     int res = 0;
-    FILE *f = fopen(path, "r");
+    FILE *f;
+    size_t i;
+    static const uint32_t known_magic_pos[] = {
+        0x0,   // default
+        0x100, // HTC signed boot images
+    };
+
+    f= fopen(path, "r");
     if(!f)
         return translate_errnum(errno);
 
-    if(fread(hdr, sizeof(struct boot_img_hdr), 1, f) == 1)
+    res = LIBBOOTIMG_ERROR_INVALID_MAGIC;
+    for(i = 0; i < sizeof(known_magic_pos)/sizeof(known_magic_pos[0]); ++i)
     {
-        if(memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) != 0)
-            res = LIBBOOTIMG_ERROR_INVALID_MAGIC;
-    }
-    else
-    {
-        res = translate_fread_error(f);
+        fseek(f, known_magic_pos[i], SEEK_SET);
+        if(fread(hdr, sizeof(struct boot_img_hdr), 1, f) == 1)
+        {
+            if(memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
+            {
+                res = 0;
+                break;
+            }
+        }
+        else
+        {
+            res = translate_fread_error(f);
+            break;
+        }
     }
 
     fclose(f);
