@@ -86,6 +86,8 @@ struct bootimg
     struct boot_img_hdr hdr; /*!< Boot image header */
     struct bootimg_blob blobs[LIBBOOTIMG_BLOB_CNT]; /*!< Blobs packed in the boot image. */
     int start_offset; /*!< Offset of the boot image structure from the start of the file. Only used when loading blobs from boot.img file. */
+    struct boot_img_hdr_elf* hdr_elf; /*!< Boot image header in ELF format */
+    uint8_t is_elf; /*!< Select the ELF boot image format */
 };
 
 /**
@@ -110,9 +112,29 @@ int libbootimg_init_load(struct bootimg *img, const char *path, int load_blob_ma
  * Loads boot_img_hdr from file on disk
  * @param hdr pointer to boot_img_hdr structure
  * @param path path to boot.img to load header from
- * @return positive offset of the header from the start of the file if successful, negative value from libbootimg_error if failed.
+ * @return positive offset of the header from the start of the file if
+ *         successful, negative value from libbootimg_error if failed.
  */
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path);
+
+/**
+ * Loads boot_img_hdr or boot_img_hdr_elf from file on disk
+ * @param hdr pointer to boot_img_hdr structure
+ * @param hdr_elf pointer to boot_img_hdr_elf structure
+ * @param is_elf pointer to is_elf attribute
+ * @param path path to boot.img to load header from
+ * @return positive offset of the header from the start of the file if
+ *         successful, negative value from libbootimg_error if failed.
+ */
+int libbootimg_load_headers(struct boot_img_hdr *hdr,
+        struct boot_img_hdr_elf *hdr_elf, uint8_t *is_elf, const char *path);
+
+/**
+ * Updates the header addresses to the blobs.
+ * @param img pointer to initialized struct bootimg
+ * @return Zero if successful, negative value from libbootimg_error if failed.
+ */
+int libbootimg_update_headers(struct bootimg *b);
 
 /**
  * Frees all resources used by this bootimg struct
