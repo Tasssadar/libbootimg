@@ -18,7 +18,7 @@ static inline unsigned align_size(unsigned size, unsigned page_size)
 
 static int translate_errnum(int errnum)
 {
-    switch(errno)
+    switch (errnum)
     {
         case EIO:     return LIBBOOTIMG_ERROR_IO;
         case EACCES:  return LIBBOOTIMG_ERROR_ACCESS;
