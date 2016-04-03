@@ -18,7 +18,7 @@ static inline unsigned align_size(unsigned size, unsigned page_size)
 
 static int translate_errnum(int errnum)
 {
-    switch(errno)
+    switch (errnum)
     {
         case EIO:     return LIBBOOTIMG_ERROR_IO;
         case EACCES:  return LIBBOOTIMG_ERROR_ACCESS;
@@ -92,6 +92,9 @@ void libbootimg_init_new(struct bootimg *img)
     memset(img, 0, sizeof(struct bootimg));
     memcpy(img->hdr.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
     img->hdr.page_size = DEFAULT_PAGE_SIZE;
+    img->hdr_elf = malloc(sizeof(struct boot_img_hdr_elf));
+    memset(img->hdr_elf, sizeof(struct boot_img_hdr_elf), 0);
+    img->is_elf = 0;
 
     img->blobs[LIBBOOTIMG_BLOB_KERNEL].size = &img->hdr.kernel_size;
     img->blobs[LIBBOOTIMG_BLOB_RAMDISK].size = &img->hdr.ramdisk_size;
@@ -109,7 +112,7 @@ int libbootimg_init_load(struct bootimg *img, const char *path, int load_blob_ma
 
     libbootimg_init_new(img);
 
-    res = libbootimg_load_header(&img->hdr, path);
+    res = libbootimg_load_headers(&img->hdr, img->hdr_elf, &img->is_elf, path);
     if(res < 0)
     {
         libbootimg_destroy(img);
@@ -148,7 +151,14 @@ int libbootimg_init_load(struct bootimg *img, const char *path, int load_blob_ma
             }
         }
 
-        addr += align_size(*blob->size, img->hdr.page_size);
+        if (!img->is_elf)
+        {
+            addr += align_size(*blob->size, img->hdr.page_size);
+        }
+        else
+        {
+            addr += *blob->size;
+        }
     }
 
     fclose(f);
@@ -164,6 +174,7 @@ void libbootimg_destroy(struct bootimg *b)
 {
     struct bootimg_blob *blob = b->blobs;
     struct bootimg_blob * const blobs_end = blob + LIBBOOTIMG_BLOB_CNT;
+    free(b->hdr_elf);
     for(; blob != blobs_end; ++blob)
     {
         free(blob->data);
@@ -173,28 +184,70 @@ void libbootimg_destroy(struct bootimg *b)
 
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
 {
+    struct boot_img_hdr_elf hdr_elf;
+    return libbootimg_load_headers(hdr, &hdr_elf, NULL, path);
+}
+
+int libbootimg_load_headers(struct boot_img_hdr *hdr,
+        struct boot_img_hdr_elf *hdr_elf, uint8_t *is_elf, const char *path)
+{
     int res = 0;
     FILE *f;
     size_t i;
+    uint32_t cmd_len;
     static const int known_magic_pos[] = {
         0x0,   // default
         0x100, // HTC signed boot images
     };
 
     f= fopen(path, "r");
-    if(!f)
+    if (!f)
         return translate_errnum(errno);
 
     res = LIBBOOTIMG_ERROR_INVALID_MAGIC;
-    for(i = 0; i < sizeof(known_magic_pos)/sizeof(known_magic_pos[0]); ++i)
+    for (i = 0; i < sizeof(known_magic_pos)/sizeof(known_magic_pos[0]); ++i)
     {
         fseek(f, known_magic_pos[i], SEEK_SET);
-        if(fread(hdr, sizeof(struct boot_img_hdr), 1, f) == 1)
+        if (fread(hdr, sizeof(struct boot_img_hdr), 1, f) == 1)
         {
-            if(memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
+            if (memcmp(hdr->magic, BOOT_MAGIC, BOOT_MAGIC_SIZE) == 0)
             {
+                if (is_elf != NULL)
+                {
+                    *is_elf = 0;
+                }
                 res = known_magic_pos[i];
                 break;
+            }
+            else if (hdr_elf != NULL && memcmp(hdr->magic + 1, BOOT_MAGIC_ELF,
+                    BOOT_MAGIC_ELF_SIZE) == 0)
+            {
+                fseek(f, 0, SEEK_SET);
+                if (fread(hdr_elf, sizeof(struct boot_img_hdr_elf), 1, f) == 1)
+                {
+                    hdr->kernel_size = hdr_elf->kernel_size;
+                    hdr->kernel_addr = hdr_elf->kernel_offset;
+                    hdr->ramdisk_size = hdr_elf->ramdisk_size;
+                    hdr->ramdisk_addr = hdr_elf->ramdisk_offset;
+                    hdr->second_size = hdr_elf->rpm_size;
+                    hdr->second_addr = hdr_elf->rpm_offset;
+                    hdr->page_size = hdr_elf->kernel_offset;
+                    hdr->tags_addr = 0;
+                    hdr->dt_size = 0;
+                    hdr->id[0] = '\0';
+                    memcpy(hdr->name, hdr_elf->name, BOOT_NAME_SIZE);
+                    cmd_len = hdr_elf->cmd_size;
+                    memset(hdr->cmdline, '\0', BOOT_ARGS_SIZE);
+                    fseek(f, hdr_elf->cmd_offset, SEEK_SET);
+                    fread(hdr->cmdline, cmd_len < BOOT_ARGS_SIZE ?
+                            cmd_len : BOOT_ARGS_SIZE, 1, f);
+                    res = known_magic_pos[i];
+                    if (is_elf != NULL)
+                    {
+                        *is_elf = 1;
+                    }
+                    break;
+                }
             }
         }
         else
@@ -206,6 +259,39 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path)
 
     fclose(f);
     return res;
+}
+
+int libbootimg_update_headers(struct bootimg *b)
+{
+    uint32_t addr;
+
+    if (b == NULL)
+        return translate_errnum(ENOENT);
+
+    if (b->is_elf)
+    {
+        b->hdr_elf->kernel_size = b->hdr.kernel_size;
+        b->hdr_elf->kernel_msize = b->hdr.kernel_size;
+        b->hdr_elf->ramdisk_size = b->hdr.ramdisk_size;
+        b->hdr_elf->ramdisk_msize = b->hdr.ramdisk_size;
+        b->hdr_elf->rpm_size = b->hdr.second_size;
+        b->hdr_elf->rpm_msize = b->hdr.second_size;
+
+        addr = b->hdr_elf->kernel_offset;
+
+        addr += b->hdr_elf->kernel_size;
+        b->hdr_elf->ramdisk_offset = addr;
+
+        addr += b->hdr_elf->ramdisk_size;
+        b->hdr_elf->rpm_offset = addr;
+
+        addr += b->hdr_elf->rpm_size;
+        b->hdr_elf->cmd_offset = addr;
+
+        memcpy(b->hdr_elf->name, b->hdr.name, BOOT_NAME_SIZE);
+    }
+
+    return 0;
 }
 
 int libbootimg_dump_blob(struct bootimg_blob *blob, const char *dest)
@@ -364,31 +450,50 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
     memset(blank, 0, b->hdr.page_size);
 
     // write header
-    if(fwrite(&b->hdr, sizeof(b->hdr), 1, f) != 1)
+    if (!b->is_elf)
+    {
+        if (fwrite(&b->hdr, sizeof(b->hdr), 1, f) != 1)
+            goto fail_fwrite;
+
+        padding = align_size(sizeof(b->hdr), b->hdr.page_size) - sizeof(b->hdr);
+    }
+    else
+    {
+        libbootimg_update_headers(b);
+
+        if (fwrite(b->hdr_elf, sizeof(*b->hdr_elf), 1, f) != 1)
+            goto fail_fwrite;
+
+        padding = align_size(sizeof(*b->hdr_elf), b->hdr.page_size) - sizeof(*b->hdr_elf);
+    }
+
+    if (fwrite(blank, 1, padding, f) != padding)
         goto fail_fwrite;
 
-    padding = align_size(sizeof(b->hdr), b->hdr.page_size) - sizeof(b->hdr);
-    if(fwrite(blank, 1, padding, f) != padding)
-        goto fail_fwrite;
-
-    for(i = 0; i < LIBBOOTIMG_BLOB_CNT; ++i)
+    for (i = 0; i < LIBBOOTIMG_BLOB_CNT; ++i)
     {
         blob = &b->blobs[i];
 
-        if(*blob->size == 0)
+        if (*blob->size == 0)
             continue;
 
-        if(fwrite(blob->data, *blob->size, 1, f) != 1)
+        if (fwrite(blob->data, *blob->size, 1, f) != 1)
             goto fail_fwrite;
 
-        padding = align_size(*blob->size, b->hdr.page_size) - *blob->size;
-        if(fwrite(blank, 1, padding, f) != padding)
-            goto fail_fwrite;
+        if (!b->is_elf)
+        {
+            padding = align_size(*blob->size, b->hdr.page_size) - *blob->size;
+            if (fwrite(blank, 1, padding, f) != padding)
+                goto fail_fwrite;
+        }
     }
+
+    if (b->is_elf && fwrite(b->hdr.cmdline, b->hdr_elf->cmd_size, 1, f) != 1)
+        goto fail_fwrite;
 
     pos_end = ftell(f);
 
-    if(pos_end > 0)
+    if (pos_end > 0)
         res = pos_end - pos_start;
     else
         res = translate_errnum(errno);
