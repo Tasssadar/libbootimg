@@ -13,8 +13,8 @@ extern "C" {
 #include <stdio.h>
 #include "boot_img_hdr.h"
 
-#define LIBBOOTIMG_VERSION 0x000202 // 0xMMNNPP
-#define LIBBOOTIMG_VERSION_STR "0.2.2"
+#define LIBBOOTIMG_VERSION 0x000203 // 0xMMNNPP
+#define LIBBOOTIMG_VERSION_STR "0.2.3"
 
 /**
  * Enum containing possible blob types in a boot image.
