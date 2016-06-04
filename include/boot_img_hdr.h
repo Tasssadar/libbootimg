@@ -130,6 +130,7 @@ struct boot_img_hdr_elf
     uint32_t cmd_msize;             /* cmdline size duplicate */
     uint32_t cmd_flags;             /* cmdline flags (0xAC to 0xAF) */
     uint32_t cmd_align;             /* cmdline alignment */
+    uint8_t header_vals[3900];      /* header additional values */
     uint8_t name[BOOT_NAME_SIZE];   /* added - asciiz product name */
 };
 
