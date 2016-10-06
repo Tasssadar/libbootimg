@@ -11,10 +11,19 @@ extern "C" {
 
 #include <stdint.h>
 #include <stdio.h>
+#include <cutils/klog.h>
 #include "boot_img_hdr.h"
 
 #define LIBBOOTIMG_VERSION 0x000203 // 0xMMNNPP
 #define LIBBOOTIMG_VERSION_STR "0.2.3"
+
+#ifdef DEBUG_KMSG
+#define LOG_DBG(fmt, ...) klog_write(3, "<3>%s: " fmt, "libbootimg", ##__VA_ARGS__)
+#elif DEBUG_STDOUT
+#define LOG_DBG printf("libbootimg: "); printf
+#else
+#define LOG_DBG(fmt, ...) ""
+#endif
 
 /**
  * Enum containing possible blob types in a boot image.
@@ -84,10 +93,12 @@ struct bootimg_blob
 struct bootimg
 {
     struct boot_img_hdr hdr; /*!< Boot image header */
-    struct bootimg_blob blobs[LIBBOOTIMG_BLOB_CNT]; /*!< Blobs packed in the boot image. */
-    int start_offset; /*!< Offset of the boot image structure from the start of the file. Only used when loading blobs from boot.img file. */
-    struct boot_img_hdr_elf* hdr_elf; /*!< Boot image header in ELF format */
+    struct bootimg_blob blob; /* Complete blob */
+    uint32_t blob_size; /* Size of the complete blob */
+    struct bootimg_blob blobs[LIBBOOTIMG_BLOB_CNT]; /*!< Blobs packed in the boot image */
+    int start_offset; /*!< Offset of the boot image structure from the start of the file. Only used when loading blobs from boot.img file */
     uint8_t is_elf; /*!< Select the ELF boot image format */
+    struct boot_img_elf_info* hdr_info; /*!< Boot image meta-information for ELF formats */
 };
 
 /**
@@ -118,6 +129,62 @@ int libbootimg_init_load(struct bootimg *img, const char *path, int load_blob_ma
 int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path);
 
 /**
+ * Determines the ELF boot image version (custom definition) and the
+ * required output format (ELF or ANDROID!) based on the number of
+ * program headers given by the ELF header.
+ * @param hdr_info pointer to the structure holding the read header information
+ */
+void libbootimg_get_elf_version(struct boot_img_elf_info *hdr_info);
+
+/**
+ * Reads the program headers from the given ELF file and adds the content
+ * of each header to the given structure.
+ * @param hdr_info structure holding the meta-information of the given ELF file
+ * @param f pointer to the file descriptor of the ELF file
+ * @return zero on success or the error code returned by the file operations.
+ */
+int libbootimg_load_elf_prog_header(struct boot_img_elf_info *hdr_info, FILE *f);
+
+/**
+ * Reads the section headers from the given ELF file and adds the content
+ * of each header to the given structure.
+ * @param hdr_info structure holding the meta-information of the given ELF file
+ * @param f pointer to the file descriptor of the ELF file
+ * @return zero on success or the error code returned by the file operations.
+ */
+int libbootimg_load_elf_sect_header(struct boot_img_elf_info *hdr_info, FILE *f);
+
+/**
+ * Reads the miscellaneous information from the given ELF file and adds the content
+ * to the given structure. This information is present in some ELF versions and
+ * required for them to operate properly (version 1).
+ * @param hdr_info structure holding the meta-information of the given ELF file
+ * @param size of the bootimage pagesize needed for alignment
+ * @param f pointer to the file descriptor of the ELF file
+ * @return one on success or the error code returned by the file operations.
+ */
+int libbootimg_load_elf_misc_header(struct boot_img_elf_info *hdr_info, uint32_t page_size, FILE *f);
+
+/**
+ * Extracts the kernel boot command line from an ELF file and adds it to
+ * the generic structure describing the blob (-> hdr).
+ * @param hdr pointer to boot_img_hdr structure
+ * @param elf_info structure holding the meta-information of the given ELF file.
+ * @param f pointer to the file descriptor of the ELF file.
+ */
+void libbootimg_read_cmdline(struct boot_img_hdr *hdr, struct boot_img_elf_info *elf_info, FILE *f);
+
+/**
+ * Returns a pointer referencing the ELF program header which describes the content
+ * of a given type like the kernel or ramdisk part of a boot image.
+ * @param hdr_info structure holding the meta-information of the given ELF file.
+ * @param type integer value that describes the desired pointer as given in the enum
+ * 			{@link libbootimg_blob_type}.
+ * @return pointer to the program header describing the desired part of the boot image.
+ */
+struct boot_img_elf_prog_hdr* get_elf_proc_hdr_of(struct boot_img_elf_info *elf_info, int type);
+
+/**
  * Loads boot_img_hdr or boot_img_hdr_elf from file on disk
  * @param hdr pointer to boot_img_hdr structure
  * @param hdr_elf pointer to boot_img_hdr_elf structure
@@ -127,7 +194,7 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path);
  *         successful, negative value from libbootimg_error if failed.
  */
 int libbootimg_load_headers(struct boot_img_hdr *hdr,
-        struct boot_img_hdr_elf *hdr_elf, uint8_t *is_elf, const char *path);
+        struct boot_img_elf_info *hdr_elf, uint8_t *is_elf, const char *path);
 
 /**
  * Updates the header addresses to the blobs.
@@ -141,8 +208,6 @@ int libbootimg_update_headers(struct bootimg *b);
  * @param b pointer to struct bootimg
  */
 void libbootimg_destroy(struct bootimg *b);
-
-
 
 /**
  * Writes blob to a file.
@@ -245,6 +310,14 @@ int libbootimg_write_img(struct bootimg *b, const char *dest);
 int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f);
 
 /**
+ * Writes boot image to a file: Updated implementation that effectively *injects* data into an existing boot image
+ * @param b pointer to struct bootimg
+ * @param f pointer to FILE to write data into
+ * @return number of bytes written to the file if successful, negative value from libbootimg_error if failed.
+ */
+int libbootimg_write_img_fileptr_new(struct bootimg *b, FILE *f);
+
+/**
  * Writes boot image to a file and then calls libbootimg_destroy.
  * The bootimg struct is destroyed even if this function fails.
  * @param b pointer to struct bootimg
@@ -273,6 +346,41 @@ const char *libbootimg_version_str(void);
  * @return readable error string
  */
 const char *libbootimg_error_str(int error);
+
+/**
+ * Prints the content of the boot image information to the stdout or
+ * the kernel log (dmesg).
+ * @param hdr pointer to the boot image information.
+ */
+void print_hdr_to_log(struct boot_img_hdr* hdr);
+
+/**
+ * Prints the content of an elf header described by the given structure
+ * to the stdout or the kernel log (dmesg).
+ * @param elf_info pointer to the elf header information.
+ */
+void print_elf_hdr_to_log(struct boot_img_elf_info* elf_info);
+
+/**
+ * Prints the content of an elf program header described by the given structure
+ * to the stdout or the kernel log (dmesg).
+ * @param elf_prog_hdr pointer to the program header information.
+ */
+void print_elf_prog_hdr_to_log(struct boot_img_elf_prog_hdr* elf_prog_hdr);
+
+/**
+ * Prints the content of an elf section header described by the given structure
+ * to the stdout or the kernel log (dmesg).
+ * @param elf_sect_hdr pointer to the section header information.
+ */
+void print_elf_sect_hdr_to_log(struct boot_img_elf_sect_hdr* elf_sect_hdr);
+
+/**
+ * Prints the content of an elf misc header described by the given structure
+ * to the stdout or the kernel log (dmesg).
+ * @param elf_sect_hdr pointer to the section header information.
+ */
+void print_elf_misc_hdr_to_log(struct boot_img_elf_misc_hdr* elf_misc_hdr);
 
 #ifdef __cplusplus
 }
