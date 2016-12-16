@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <limits.h>
 
@@ -245,14 +246,14 @@ int libbootimg_load_headers(struct boot_img_hdr *hdr,
                 {
                     hdr->id[0] = '\0';
 
+                    libbootimg_get_elf_version(hdr_info);
+
                     res = known_magic_pos[i];
                     if (is_elf != NULL)
                     {
                         *is_elf = 1;
                         print_elf_hdr_to_log(hdr_info);
                     }
-
-                    libbootimg_get_elf_version(hdr_info);
 
                     res = libbootimg_load_elf_prog_header(hdr_info, f);
                     if (res != 1)
@@ -919,6 +920,33 @@ int libbootimg_write_img_and_destroy(struct bootimg *b, const char *dest)
     return res;
 }
 
+uint8_t libbootimg_architecture(void)
+{
+    FILE* cpuinfo;
+    char buffer[100];
+
+    memset(buffer, 0, sizeof(buffer));
+    cpuinfo = fopen("/proc/cpuinfo", "rb");
+
+    if (cpuinfo == NULL)
+    {
+        return ARCH_32_BITS;
+    }
+
+    if (fread(buffer, 1, sizeof(buffer), cpuinfo) == 0)
+    {
+        fclose(cpuinfo);
+        return ARCH_32_BITS;
+    }
+    fclose(cpuinfo);
+
+    if (strstr(buffer, "aarch64")) {
+        return ARCH_64_BITS;
+    }
+
+    return ARCH_32_BITS;
+}
+
 uint32_t libbootimg_version(void)
 {
     return LIBBOOTIMG_VERSION;
@@ -951,6 +979,9 @@ const char *libbootimg_error_str(int error)
 
 void print_hdr_to_log(struct boot_img_hdr* hdr)
 {
+    LOG_DBG("* architecture = %s\n",
+            libbootimg_architecture() == ARCH_64_BITS ? "64bits" : "32bits");
+
     LOG_DBG("* kernel size       = %u bytes (%.2f MB)\n", hdr->kernel_size,
             (double )hdr->kernel_size / 0x100000);
     LOG_DBG("  ramdisk size      = %u bytes (%.2f MB)\n", hdr->ramdisk_size,
@@ -979,6 +1010,8 @@ void print_elf_hdr_to_log(struct boot_img_elf_info* elf_info)
 {
     (void)elf_info;
     LOG_DBG("========= ELF header content =========\n");
+    LOG_DBG("Architecture                   = %s\n",
+            libbootimg_architecture() == ARCH_64_BITS ? "64bits" : "32bits");
     LOG_DBG("Type (0x10 to 0x11)            = %x\n", elf_info->hdr.type);
     LOG_DBG("Machine (0x12 to 0x13)         = %x\n", elf_info->hdr.machine);
     LOG_DBG("Version (0x14 to 0x17)         = %x\n", elf_info->hdr.version);

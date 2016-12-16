@@ -25,6 +25,9 @@ extern "C" {
 #define LOG_DBG(fmt, ...) ""
 #endif
 
+#define ARCH_32_BITS 0
+#define ARCH_64_BITS 1
+
 /**
  * Enum containing possible blob types in a boot image.
  */
@@ -326,6 +329,11 @@ int libbootimg_write_img_fileptr_new(struct bootimg *b, FILE *f);
  */
 int libbootimg_write_img_and_destroy(struct bootimg *b, const char *dest);
 
+/**
+ * Returns architecture type, 32bits or 64bits
+ * @return architecture identification ARCH_32_BITS or ARCH_64_BITS
+ */
+uint8_t libbootimg_architecture(void);
 
 /**
  * Returns version number, format is 0xMMNNPP, so for version 0.1.12 it would return 0x000112

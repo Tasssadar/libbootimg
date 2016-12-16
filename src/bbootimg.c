@@ -286,6 +286,9 @@ static int print_info(const char *path)
     img.hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
 
     printf ("\nAndroid Boot Image Info:\n\n");
+    printf ("* architecture = %s\n\n",
+            libbootimg_architecture() == ARCH_64_BITS ? "64bits" : "32bits");
+
     printf ("* file name = %s\n\n", path);
 
     printf ("* image size = %ld bytes (%.2f MB)\n", size, (double)size/0x100000);
