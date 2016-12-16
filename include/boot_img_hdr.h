@@ -96,21 +96,22 @@ struct boot_img_hdr
 
 struct boot_img_elf_hdr
 {
-    uint8_t magic[8];               /* .ELF (0x00 to 0x07) */
-    uint8_t unused[8];              /* unused chars (0x08 to 0x0F) */
-    uint16_t type;                  /* boot type (0x10 to 0x11) */
-    uint16_t machine;               /* boot machine (0x12 to 0x13) */
-    uint32_t version;               /* boot version (0x14 to 0x17) */
-    uint32_t entry_addr;            /* boot entry (0x18 to 0x1B) */
-    uint32_t phoff;                 /* boot phoff (0x1C to 0x1F) */
-    uint32_t shoff;                 /* boot shoff (0x20 to 0x23) */
-    uint32_t flags;                 /* boot flags (0x24 to 0x27) */
-    uint16_t ehsize;                /* boot ehsize (0x28 to 0x29) */
-    uint16_t phentsize;             /* boot phentsize (0x2A to 0x2B) */
-    uint16_t phnum;                 /* boot phnum (0x2C to 0x2D) */
-    uint16_t shentsize;             /* boot shentsize (0x2E to 0x2F)*/
-    uint16_t shnum;                 /* boot shnum (0x30 to 0x31) */
-    uint16_t shstrndx;              /* boot shstrndx (0x32 to 0x33) */
+    /* Global structure of the Sony ELF header - Respective usual values:  | 8960       | 8974       | */
+    uint8_t magic[8];               /* .ELF (0x00 to 0x07)                 | .ELF...    | .ELF...    | */
+    uint8_t unused[8];              /* unused chars (0x08 to 0x0F)         | 0x00       | 0x00       | */
+    uint16_t type;                  /* boot type (0x10 to 0x11)            | 0x02       | 0x02       | */
+    uint16_t machine;               /* boot machine (0x12 to 0x13)         | 0x28       | 0x28       | */
+    uint32_t version;               /* boot version (0x14 to 0x17)         | 0x01       | 0x01       | */
+    uint32_t entry_addr;            /* boot entry (0x18 to 0x1B)           | 0x80208000 | 0x00008000 | */
+    uint32_t phoff;                 /* boot phoff (0x1C to 0x1F)           | 0x34       | 0x34       | */
+    uint32_t shoff;                 /* boot shoff (0x20 to 0x23)           | 0x00000000 | 0x00B3.... | */
+    uint32_t flags;                 /* boot flags (0x24 to 0x27)           | 0x00       | 0x00       | */
+    uint16_t ehsize;                /* boot ehsize (0x28 to 0x29)          | 0x34       | 0x34       | */
+    uint16_t phentsize;             /* boot phentsize (0x2A to 0x2B)       | 0x20       | 0x20       | */
+    uint16_t phnum;                 /* boot phnum (0x2C to 0x2D)           | 0x05/0x04  | 0x03       | */
+    uint16_t shentsize;             /* boot shentsize (0x2E to 0x2F)       | 0x00       | 0x28       | */
+    uint16_t shnum;                 /* boot shnum (0x30 to 0x31)           | 0x00       | 0x01       | */
+    uint16_t shstrndx;              /* boot shstrndx (0x32 to 0x33)        | 0x00       | 0x00       | */
 };
 
 struct boot_img_elf_info
