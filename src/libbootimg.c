@@ -376,15 +376,19 @@ int libbootimg_load_elf_prog_header(struct boot_img_elf_info *hdr_info, FILE *f)
     int prog_entry_idx = 0;
     for (; prog_entry_idx < hdr_info->hdr.phnum; ++prog_entry_idx)
     {
-        LOG_DBG("Reading program header %u/%u.\n", prog_entry_idx + 1, hdr_info->hdr.phnum);
+        LOG_DBG("Reading program header %u/%u.\n",
+                prog_entry_idx + 1, hdr_info->hdr.phnum);
         res = fread(&prog_entry[prog_entry_idx], prog_entry_size, 1, f);
         if (res == 1)
         {
-            LOG_DBG("Program header %u/%u successfully read.\n", prog_entry_idx + 1, hdr_info->hdr.phnum);
+            LOG_DBG("Program header %u/%u successfully read.\n",
+                    prog_entry_idx + 1, hdr_info->hdr.phnum);
             print_elf_prog_hdr_to_log(&hdr_info->prog[prog_entry_idx]);
         }
         else
         {
+            LOG_DBG("Program header %u/%u read failed.\n",
+                    prog_entry_idx + 1, hdr_info->hdr.phnum);
             break;
         }
     }
@@ -409,11 +413,14 @@ int libbootimg_load_elf_sect_header(struct boot_img_elf_info *hdr_info, FILE *f)
 
         if (res == 1)
         {
-            LOG_DBG("Section header %u/%u successfully read.\n", sect_entry_idx + 1, hdr_info->hdr.shnum);
+            LOG_DBG("Section header %u/%u successfully read.\n",
+                    sect_entry_idx + 1, hdr_info->hdr.shnum);
             print_elf_sect_hdr_to_log(&hdr_info->sect[sect_entry_idx]);
         }
         else
         {
+            LOG_DBG("Section header %u/%u read failed.\n",
+                    sect_entry_idx + 1, hdr_info->hdr.shnum);
             break;
         }
     }
@@ -843,12 +850,16 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
 
     for (i = 0; i < LIBBOOTIMG_BLOB_CNT; ++i)
     {
-        LOG_DBG("Writing blob number %d/%d...\n", i + 1, LIBBOOTIMG_BLOB_CNT);
-        LOG_DBG("Writing to position 0x%lx.\n", ftell(f));
         blob = &b->blobs[i];
 
         if (*blob->size == 0)
+        {
+            LOG_DBG("Ignored empty blob number %d/%d...\n", i + 1, LIBBOOTIMG_BLOB_CNT);
             continue;
+        }
+
+        LOG_DBG("Writing blob number %d/%d...\n", i + 1, LIBBOOTIMG_BLOB_CNT);
+        LOG_DBG("Writing to position 0x%lx.\n", ftell(f));
 
         if (fwrite(blob->data, *blob->size, 1, f) != 1)
         {
@@ -871,10 +882,10 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
     {
         if (b->hdr_info->elf_version == VER_ELF_1)
         {
+            // Write the cmdline (last part ref by the prog header)
             pos_end += b->hdr_info->cmdline_size;
             LOG_DBG("cmdline: %s\n", b->hdr.cmdline);
-            LOG_DBG("cmdline: %x\n", b->hdr_info->cmdline_size);
-            // Write the cmdline (last part ref by the prog header)
+            LOG_DBG("cmdline size: %u\n", b->hdr_info->cmdline_size);
             if (fwrite(&b->hdr.cmdline, b->hdr_info->cmdline_size, 1, f) != 1)
             {
                 LOG_DBG("Failed to write the cmdline.\n");
@@ -910,6 +921,7 @@ fail_fwrite:
     res = LIBBOOTIMG_ERROR_IO;
 exit:
     free(blank);
+    LOG_DBG("Done writing.\n");
     return res;
 }
 
@@ -1009,22 +1021,25 @@ void print_hdr_to_log(struct boot_img_hdr* hdr)
 void print_elf_hdr_to_log(struct boot_img_elf_info* elf_info)
 {
     (void)elf_info;
+    LOG_DBG("\n");
     LOG_DBG("========= ELF header content =========\n");
     LOG_DBG("Architecture                   = %s\n",
             libbootimg_architecture() == ARCH_64_BITS ? "64bits" : "32bits");
-    LOG_DBG("Type (0x10 to 0x11)            = %x\n", elf_info->hdr.type);
-    LOG_DBG("Machine (0x12 to 0x13)         = %x\n", elf_info->hdr.machine);
-    LOG_DBG("Version (0x14 to 0x17)         = %x\n", elf_info->hdr.version);
-    LOG_DBG("Entry Address (0x18 to 0x1B)   = %x\n", elf_info->hdr.entry_addr);
-    LOG_DBG("Phys Offset (0x1C to 0x1F)     = %x\n", elf_info->hdr.phoff);
-    LOG_DBG("Section Offset (0x20 to 0x23)  = %x\n", elf_info->hdr.shoff);
-    LOG_DBG("Flags (0x24 to 0x27)           = %x\n", elf_info->hdr.flags);
-    LOG_DBG("Ehsize (0x28 to 0x29)          = %x\n", elf_info->hdr.ehsize);
-    LOG_DBG("Ph entry size (0x2A to 0x2B)   = %x\n", elf_info->hdr.phentsize);
-    LOG_DBG("Ph number (0x2C to 0x2D)       = %x\n", elf_info->hdr.phnum);
-    LOG_DBG("Sect entry size (0x2E to 0x2F) = %x\n", elf_info->hdr.shentsize);
-    LOG_DBG("Sect number (0x30 to 0x31)     = %x\n", elf_info->hdr.shnum);
-    LOG_DBG("Sect strndx (0x32 to 0x33)     = %x\n", elf_info->hdr.shstrndx);
+    LOG_DBG("ELF Version                    = %x\n", elf_info->elf_version);
+    LOG_DBG("Output format                  = %s\n", elf_info->elf_out_format == OUT_ELF ? "ELF" : "ANDROID");
+    LOG_DBG("Type                           = %u\n", elf_info->hdr.type);
+    LOG_DBG("Machine                        = %u\n", elf_info->hdr.machine);
+    LOG_DBG("Version                        = %u\n", elf_info->hdr.version);
+    LOG_DBG("Entry Address                  = %x\n", elf_info->hdr.entry_addr);
+    LOG_DBG("Program Offset                 = %x\n", elf_info->hdr.phoff);
+    LOG_DBG("Section Offset                 = %x\n", elf_info->hdr.shoff);
+    LOG_DBG("Flags                          = %x\n", elf_info->hdr.flags);
+    LOG_DBG("Ehsize                         = %u\n", elf_info->hdr.ehsize);
+    LOG_DBG("Program headers size           = %u\n", elf_info->hdr.phentsize);
+    LOG_DBG("Program headers number         = %u\n", elf_info->hdr.phnum);
+    LOG_DBG("Section headers size           = %u\n", elf_info->hdr.shentsize);
+    LOG_DBG("Section headers number         = %u\n", elf_info->hdr.shnum);
+    LOG_DBG("Section strndx                 = %x\n", elf_info->hdr.shstrndx);
     LOG_DBG("======================================\n");
 }
 
@@ -1036,8 +1051,8 @@ void print_elf_prog_hdr_to_log(struct boot_img_elf_prog_hdr* elf_prog_hdr)
     LOG_DBG("Offset                         = %x\n", elf_prog_hdr->offset);
     LOG_DBG("VAddr                          = %x\n", elf_prog_hdr->vaddr);
     LOG_DBG("PAddr                          = %x\n", elf_prog_hdr->paddr);
-    LOG_DBG("Size                           = %x\n", elf_prog_hdr->size);
-    LOG_DBG("MSize                          = %x\n", elf_prog_hdr->msize);
+    LOG_DBG("Size                           = %u\n", elf_prog_hdr->size);
+    LOG_DBG("MSize                          = %u\n", elf_prog_hdr->msize);
     LOG_DBG("Flags                          = %x\n", elf_prog_hdr->flags);
     LOG_DBG("Align                          = %x\n", elf_prog_hdr->align);
     LOG_DBG("======================================\n");
@@ -1052,7 +1067,7 @@ void print_elf_sect_hdr_to_log(struct boot_img_elf_sect_hdr* elf_sect_hdr)
     LOG_DBG("Flags                          = %x\n", elf_sect_hdr->flags);
     LOG_DBG("Address                        = %x\n", elf_sect_hdr->addr);
     LOG_DBG("Offset                         = %x\n", elf_sect_hdr->offset);
-    LOG_DBG("Size                           = %x\n", elf_sect_hdr->size);
+    LOG_DBG("Size                           = %u\n", elf_sect_hdr->size);
     LOG_DBG("======================================\n");
 }
 
