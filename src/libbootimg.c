@@ -543,16 +543,18 @@ int libbootimg_update_headers(struct bootimg *b)
         b->hdr_info->prog[ELF_PROG_KER].msize = b->hdr.kernel_size;
         b->hdr_info->prog[ELF_PROG_RAM].size = b->hdr.ramdisk_size;
         b->hdr_info->prog[ELF_PROG_RAM].msize = b->hdr.ramdisk_size;
-        b->hdr_info->prog[ELF_PROG_RPM].size = b->hdr.second_size;
-        b->hdr_info->prog[ELF_PROG_RPM].msize = b->hdr.second_size;
 
         if (b->hdr_info->elf_version == VER_ELF_1)
         {
+            b->hdr_info->prog[ELF_PROG_RPM].size = b->hdr.second_size;
+            b->hdr_info->prog[ELF_PROG_RPM].msize = b->hdr.second_size;
             b->hdr_info->prog[ELF_PROG_CMD].size = b->hdr_info->cmdline_size;
             b->hdr_info->prog[ELF_PROG_CMD].msize = b->hdr_info->cmdline_size;
         }
         else
         {
+            b->hdr_info->prog[ELF_PROG_RPM].size = b->hdr.dt_size;
+            b->hdr_info->prog[ELF_PROG_RPM].msize = b->hdr.dt_size;
             b->hdr_info->prog[ELF_PROG_CMD].size = b->hdr.dt_size;
             b->hdr_info->prog[ELF_PROG_CMD].msize = b->hdr.dt_size;
         }
@@ -568,9 +570,12 @@ int libbootimg_update_headers(struct bootimg *b)
         b->hdr_info->prog[ELF_PROG_RPM].offset = addr;
 
         addr += b->hdr_info->prog[ELF_PROG_RPM].size;
-        b->hdr_info->prog[ELF_PROG_CMD].offset = addr;
 
-        addr += b->hdr_info->prog[ELF_PROG_CMD].size;
+        if (b->hdr_info->elf_version == VER_ELF_1)
+        {
+            b->hdr_info->prog[ELF_PROG_CMD].offset = addr;
+            addr += b->hdr_info->prog[ELF_PROG_CMD].size;
+        }
 
         // Also, we need to update the address/offset pointers & sizes
         // in the section header table
@@ -825,19 +830,6 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
             else
             {
                 LOG_DBG("Misc header writing successful.\n");
-            }
-        }
-        else if (b->hdr_info->elf_version == VER_ELF_2)
-        {
-            // Fill remaining block with 0s up to first prog entry
-            // (misc data NOT written back!)
-            uint32_t header_size = sizeof(b->hdr_info->hdr) +
-                    b->hdr_info->hdr.phnum * b->hdr_info->hdr.phentsize +
-                    b->hdr_info->hdr.shnum * b->hdr_info->hdr.shentsize;
-            uint32_t blank_size = b->hdr.page_size - header_size;
-            if (fwrite(blank, blank_size, 1, f) != blank_size)
-            {
-                goto fail_fwrite;
             }
         }
     }
