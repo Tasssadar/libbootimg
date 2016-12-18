@@ -123,6 +123,10 @@ struct boot_img_elf_info
     uint8_t elf_version;
     uint8_t elf_out_format;
     uint32_t cmdline_size;
+    uint8_t cmdline_metadata[8];
+    uint32_t cmdline_metadata_cnt;
+    uint8_t* cmdline_signature;
+    uint32_t cmdline_signature_cnt;
 };
 
 struct boot_img_elf_prog_hdr

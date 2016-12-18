@@ -100,6 +100,7 @@ void libbootimg_init_new(struct bootimg *img)
     img->hdr.page_size = DEFAULT_PAGE_SIZE;
     img->hdr_info = malloc(sizeof(struct boot_img_elf_info));
     memset(img->hdr_info, 0, sizeof(struct boot_img_elf_info));
+    img->hdr_info->cmdline_signature = 0;
     img->is_elf = 0;
 
     img->blobs[LIBBOOTIMG_BLOB_KERNEL].size = &img->hdr.kernel_size;
@@ -193,6 +194,10 @@ void libbootimg_destroy(struct bootimg *b)
 {
     struct bootimg_blob *blob = b->blobs;
     struct bootimg_blob * const blobs_end = blob + LIBBOOTIMG_BLOB_CNT;
+    if (b->hdr_info->cmdline_signature != 0)
+    {
+        free(b->hdr_info->cmdline_signature);
+    }
     free(b->hdr_info);
     for(; blob != blobs_end; ++blob)
     {
@@ -465,42 +470,62 @@ void libbootimg_read_cmdline(struct boot_img_hdr *hdr, struct boot_img_elf_info 
 {
     unsigned char buf[BOOT_ARGS_SIZE];
     int cmdline_start_pos = 0;
-    int cmd_len_max = 0;
+    uint32_t cmdline_full_size = 0;
 
     if (elf_info->elf_version == VER_ELF_1)
     {
         cmdline_start_pos = elf_info->prog[ELF_PROG_CMD].offset;
         elf_info->cmdline_size = elf_info->prog[ELF_PROG_CMD].size;
-        cmd_len_max = elf_info->cmdline_size;
     }
     else if (elf_info->elf_version == VER_ELF_2)
     {
         cmdline_start_pos = elf_info->sect[ELF_SECT_CMD].offset;
         elf_info->cmdline_size = elf_info->sect[ELF_SECT_CMD].size;
-        cmd_len_max = elf_info->cmdline_size;
     }
-    cmd_len_max = cmd_len_max < BOOT_ARGS_SIZE ? cmd_len_max : BOOT_ARGS_SIZE;
+
+    cmdline_full_size = elf_info->cmdline_size;
+    elf_info->cmdline_signature = 0;
+    elf_info->cmdline_signature_cnt = 0;
+    elf_info->cmdline_size = cmdline_full_size < BOOT_ARGS_SIZE ?
+            cmdline_full_size : BOOT_ARGS_SIZE;
 
     memset(&hdr->cmdline, '\0', BOOT_ARGS_SIZE);
-    memset(&buf, '\0', BOOT_ARGS_SIZE);
     fseek(f, cmdline_start_pos, SEEK_SET);
-    fread(buf, cmd_len_max, 1, f);
 
-    int buf_offset = 0;
+    int buf_idx;
     if (elf_info->elf_version == VER_ELF_2)
     {
-        buf_offset = 8;
-    }
-
-    int buf_idx = 0;
-    for (; buf_idx < cmd_len_max; ++buf_idx)
-    {
-        hdr->cmdline[buf_idx] = buf[buf_idx + buf_offset];
-        if (buf[buf_idx + buf_offset] == '\0')
+        elf_info->cmdline_metadata_cnt = 8;
+        if (fread(elf_info->cmdline_metadata, 8, 1, f) != 1)
         {
-            break;
+            LOG_DBG("Cmd line metadata read failed.\n");
         }
     }
+    else
+    {
+        elf_info->cmdline_metadata_cnt = 0;
+        memset(elf_info->cmdline_metadata,
+                0, sizeof(elf_info->cmdline_metadata));
+    }
+
+    fread(hdr->cmdline, elf_info->cmdline_size, 1, f);
+
+    if (cmdline_full_size > elf_info->cmdline_size)
+    {
+        elf_info->cmdline_signature_cnt =
+                cmdline_full_size - elf_info->cmdline_size;
+        elf_info->cmdline_signature = malloc(
+                elf_info->cmdline_signature_cnt * sizeof(uint8_t));
+
+        LOG_DBG("Cmd line signature size: %u\n",
+                elf_info->cmdline_signature_cnt);
+        if (fread(elf_info->cmdline_signature, elf_info->cmdline_signature_cnt,
+                1, f) != 1)
+        {
+            LOG_DBG("Cmd line signature read failed.\n");
+        }
+    }
+
     LOG_DBG("Cmd line: %s\n", hdr->cmdline);
 }
 
@@ -888,6 +913,43 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
         // Write the section header if needed by the ELF
         if (b->hdr_info->hdr.shnum > 0)
         {
+            // Prepare the cmdline data
+            LOG_DBG("Writing cmdline data.\n");
+            LOG_DBG("cmdline: %s\n", b->hdr.cmdline);
+            LOG_DBG("cmdline size: %u\n", b->hdr_info->cmdline_size);
+            fseek(f, b->hdr_info->sect[ELF_SECT_CMD].offset, SEEK_SET);
+
+            // Write the cmdline metadata
+            if (b->hdr_info->cmdline_metadata_cnt > 0 &&
+                    fwrite(&b->hdr_info->cmdline_metadata,
+                        b->hdr_info->cmdline_metadata_cnt, 1, f) != 1)
+            {
+                LOG_DBG("Failed to write the cmdline metadata.\n");
+                goto fail_fwrite;
+            }
+
+            // Write the cmdline based on section header
+            if (fwrite(&b->hdr.cmdline, b->hdr_info->cmdline_size, 1, f) != 1)
+            {
+                LOG_DBG("Failed to write the cmdline.\n");
+                goto fail_fwrite;
+            }
+
+            // Write the cmdline signature based on section header
+            if (b->hdr_info->cmdline_signature_cnt > 0)
+            {
+                LOG_DBG("Writing cmdline signature.\n");
+                fseek(f, b->hdr_info->sect[ELF_SECT_CMD].offset +
+                        b->hdr_info->cmdline_metadata_cnt + BOOT_ARGS_SIZE, SEEK_SET);
+                if (fwrite(b->hdr_info->cmdline_signature,
+                        b->hdr_info->cmdline_signature_cnt, 1, f) != 1)
+                {
+                    LOG_DBG("Failed to write the cmdline signature.\n");
+                    goto fail_fwrite;
+                }
+            }
+
+            // Write the section header
             LOG_DBG("Writing section header.\n");
             fseek(f, b->hdr_info->hdr.shoff, SEEK_SET);
             if (fwrite(b->hdr_info->sect, b->hdr_info->hdr.shentsize, 1, f) == 1)
