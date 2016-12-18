@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <limits.h>
 
@@ -246,8 +247,8 @@ int libbootimg_load_headers(struct boot_img_hdr *hdr,
             else if (hdr_info != NULL && memcmp(hdr->magic + 1, BOOT_MAGIC_ELF,
                     BOOT_MAGIC_ELF_SIZE) == 0)
             {
-                fseek(f, 0, SEEK_SET);
-                if (fread(&hdr_info->hdr, sizeof(struct boot_img_elf_hdr), 1, f) == 1)
+                res = libbootimg_load_elf_header(hdr_info, f);
+                if (res == 1)
                 {
                     hdr->id[0] = '\0';
 
@@ -323,7 +324,8 @@ int libbootimg_load_headers(struct boot_img_hdr *hdr,
                         }
                         memcpy(hdr->name, hdr_info->misc->name, BOOT_NAME_SIZE);
                     }
-                    else if (hdr_info->elf_version == VER_ELF_2)
+                    else if (hdr_info->elf_version == VER_ELF_2 ||
+                            hdr_info->elf_version == VER_ELF_4)
                     {
                         res = libbootimg_load_elf_sect_header(hdr_info, f);
                         if (res != 1)
@@ -352,22 +354,76 @@ int libbootimg_load_headers(struct boot_img_hdr *hdr,
 
 void libbootimg_get_elf_version(struct boot_img_elf_info *hdr_info)
 {
-    switch (hdr_info->hdr.phnum)
+    if (hdr_info->elf_architecture == ARCH_64_BITS)
     {
-        case 3:
-            // Version 2 (found in Z2, 8960) has 3 program headers + 1 section header
-            hdr_info->elf_version = VER_ELF_2;
-            // Also the bootloader does not load modified elf images
-            // Output to standard Android container format
-            hdr_info->elf_out_format = OUT_AND;
-            break;
-        case 4:
-        default:
-            // Version 1 (found in SP, 8960) has 4 program headers
-            hdr_info->elf_version = VER_ELF_1;
-            hdr_info->elf_out_format = OUT_ELF;
-            break;
+        // Version 4 (found in XP, 8996) has 3 program headers + 1 section header
+        hdr_info->elf_version = VER_ELF_4;
+        // Also the bootloader does not load modified elf images
+        // Output to standard Android container format
+        hdr_info->elf_out_format = OUT_AND;
     }
+    else
+    {
+        switch (hdr_info->hdr.phnum)
+        {
+            case 3:
+                // Version 2 (found in Z2, 8960) has 3 program headers + 1 section header
+                hdr_info->elf_version = VER_ELF_2;
+                // Also the bootloader does not load modified elf images
+                // Output to standard Android container format
+                hdr_info->elf_out_format = OUT_AND;
+                break;
+            case 4:
+            case 5:
+            default:
+                // Version 1 (found in SP, 8960) has 4 program headers
+                hdr_info->elf_version = VER_ELF_1;
+                hdr_info->elf_out_format = OUT_ELF;
+                break;
+        }
+    }
+}
+
+int libbootimg_load_elf_header(struct boot_img_elf_info *hdr_info, FILE *f)
+{
+    int res = 0;
+
+    fseek(f, 0, SEEK_SET);
+    hdr_info->elf_architecture = libbootimg_architecture();
+
+    if (hdr_info->elf_architecture == ARCH_64_BITS)
+    {
+        LOG_DBG("Reading elf header (64bits).\n");
+        res = fread(&hdr_info->hdr, sizeof(struct boot_img_elf_hdr), 1, f);
+    }
+    else
+    {
+        LOG_DBG("Reading elf header (32bits).\n");
+        res = fread(&hdr_info->hdr_32, sizeof(struct boot_img_elf_hdr_32),
+                1, f);
+        if (res == 1)
+        {
+            memcpy(hdr_info->hdr.magic, hdr_info->hdr_32.magic,
+                    8 * sizeof(uint8_t));
+            memcpy(hdr_info->hdr.unused, hdr_info->hdr_32.unused,
+                    8 * sizeof(uint8_t));
+            hdr_info->hdr.type = hdr_info->hdr_32.type;
+            hdr_info->hdr.machine = hdr_info->hdr_32.machine;
+            hdr_info->hdr.version = hdr_info->hdr_32.version;
+            hdr_info->hdr.entry_addr = (uint64_t) hdr_info->hdr_32.entry_addr;
+            hdr_info->hdr.phoff = (uint64_t) hdr_info->hdr_32.phoff;
+            hdr_info->hdr.shoff = (uint64_t) hdr_info->hdr_32.shoff;
+            hdr_info->hdr.flags = hdr_info->hdr_32.flags;
+            hdr_info->hdr.ehsize = hdr_info->hdr_32.ehsize;
+            hdr_info->hdr.phentsize = hdr_info->hdr_32.phentsize;
+            hdr_info->hdr.phnum = hdr_info->hdr_32.phnum;
+            hdr_info->hdr.shentsize = hdr_info->hdr_32.shentsize;
+            hdr_info->hdr.shnum = hdr_info->hdr_32.shnum;
+            hdr_info->hdr.shstrndx = hdr_info->hdr_32.shstrndx;
+        }
+    }
+
+    return res;
 }
 
 int libbootimg_load_elf_prog_header(struct boot_img_elf_info *hdr_info, FILE *f)
@@ -381,19 +437,74 @@ int libbootimg_load_elf_prog_header(struct boot_img_elf_info *hdr_info, FILE *f)
     int prog_entry_idx = 0;
     for (; prog_entry_idx < hdr_info->hdr.phnum; ++prog_entry_idx)
     {
-        LOG_DBG("Reading program header %u/%u.\n",
-                prog_entry_idx + 1, hdr_info->hdr.phnum);
-        res = fread(&prog_entry[prog_entry_idx], prog_entry_size, 1, f);
+        if (hdr_info->elf_architecture == ARCH_64_BITS)
+        {
+            LOG_DBG("Reading program header %u/%u (64bits).\n",
+                    prog_entry_idx + 1, hdr_info->hdr.phnum);
+
+            if (prog_entry_size != hdr_info->hdr.phentsize)
+            {
+                LOG_DBG("Program header %u/%u [%u != %u] mismatch.\n",
+                        prog_entry_idx + 1, hdr_info->hdr.phnum,
+                        prog_entry_size, hdr_info->hdr.phentsize);
+                free(prog_entry);
+                return 0;
+            }
+
+            res = fread(&prog_entry[prog_entry_idx],
+                    hdr_info->hdr.phentsize, 1, f);
+        }
+        else
+        {
+            LOG_DBG("Reading program header %u/%u (32bits).\n",
+                    prog_entry_idx + 1, hdr_info->hdr.phnum);
+
+            int prog_entry_size_32 = sizeof(struct boot_img_elf_prog_hdr_32);
+            struct boot_img_elf_prog_hdr_32 *prog_entry_32;
+            prog_entry_32 = malloc(prog_entry_size * hdr_info->hdr_32.phnum);
+            hdr_info->prog_32 = prog_entry_32;
+
+            if (prog_entry_size_32 != hdr_info->hdr_32.phentsize)
+            {
+                LOG_DBG("Program header %u/%u [%u != %u] mismatch.\n",
+                        prog_entry_idx + 1, hdr_info->hdr_32.phnum,
+                        prog_entry_size_32, hdr_info->hdr_32.phentsize);
+                free(prog_entry_32);
+                free(prog_entry);
+                return 0;
+            }
+
+            res = fread(&prog_entry_32[prog_entry_idx],
+                    hdr_info->hdr_32.phentsize, 1, f);
+            if (res == 1)
+            {
+                prog_entry[prog_entry_idx].type =
+                        (uint64_t) prog_entry_32[prog_entry_idx].type;
+                prog_entry[prog_entry_idx].offset =
+                        (uint64_t) prog_entry_32[prog_entry_idx].offset;
+                prog_entry[prog_entry_idx].vaddr =
+                        (uint64_t) prog_entry_32[prog_entry_idx].vaddr;
+                prog_entry[prog_entry_idx].paddr =
+                        (uint64_t) prog_entry_32[prog_entry_idx].paddr;
+                prog_entry[prog_entry_idx].size =
+                        (uint64_t) prog_entry_32[prog_entry_idx].size;
+                prog_entry[prog_entry_idx].msize =
+                        (uint64_t) prog_entry_32[prog_entry_idx].msize;
+                prog_entry[prog_entry_idx].flags =
+                        prog_entry_32[prog_entry_idx].flags;
+                prog_entry[prog_entry_idx].align =
+                        prog_entry_32[prog_entry_idx].align;
+            }
+        }
+
         if (res == 1)
         {
-            LOG_DBG("Program header %u/%u successfully read.\n",
-                    prog_entry_idx + 1, hdr_info->hdr.phnum);
+            LOG_DBG("Program header %u/%u successfully read.\n", prog_entry_idx + 1, hdr_info->hdr.phnum);
             print_elf_prog_hdr_to_log(&hdr_info->prog[prog_entry_idx]);
         }
         else
         {
-            LOG_DBG("Program header %u/%u read failed.\n",
-                    prog_entry_idx + 1, hdr_info->hdr.phnum);
+            LOG_DBG("Program header %u/%u read failed.\n", prog_entry_idx + 1, hdr_info->hdr.phnum);
             break;
         }
     }
@@ -407,14 +518,70 @@ int libbootimg_load_elf_sect_header(struct boot_img_elf_info *hdr_info, FILE *f)
     struct boot_img_elf_sect_hdr *sect_entry;
 
     fseek(f, hdr_info->hdr.shoff, SEEK_SET);
-    sect_entry = malloc(hdr_info->hdr.shentsize * hdr_info->hdr.shnum);
+    sect_entry = malloc(sect_entry_size * hdr_info->hdr.shnum);
     hdr_info->sect = sect_entry;
 
     int sect_entry_idx = 0;
     for (; sect_entry_idx < hdr_info->hdr.shnum; ++sect_entry_idx)
     {
-        LOG_DBG("Reading section header %u/%u.\n", sect_entry_idx + 1, hdr_info->hdr.shnum);
-        res = fread(&sect_entry[sect_entry_idx], sect_entry_size, 1, f);
+        if (hdr_info->elf_architecture == ARCH_64_BITS)
+        {
+            LOG_DBG("Reading section header %u/%u (64bits).\n",
+                    sect_entry_idx + 1, hdr_info->hdr.shnum);
+
+            if (sect_entry_size != hdr_info->hdr.shentsize)
+            {
+                LOG_DBG("Section header %u/%u [%u != %u] mismatch.\n",
+                        sect_entry_idx + 1, hdr_info->hdr.shnum,
+                        sect_entry_size, hdr_info->hdr.shentsize);
+                free(sect_entry);
+                return 0;
+            }
+
+            res = fread(&sect_entry[sect_entry_idx],
+                    hdr_info->hdr.shentsize, 1, f);
+        }
+        else
+        {
+            LOG_DBG("Reading section header %u/%u (32bits).\n",
+                    sect_entry_idx + 1, hdr_info->hdr.shnum);
+
+            int sect_entry_size_32 = sizeof(struct boot_img_elf_sect_hdr_32);
+            struct boot_img_elf_sect_hdr_32 *sect_entry_32;
+            sect_entry_32 = malloc(hdr_info->hdr.shentsize * hdr_info->hdr.shnum);
+            hdr_info->sect_32 = sect_entry_32;
+
+            if (sect_entry_size_32 != hdr_info->hdr_32.shentsize)
+            {
+                LOG_DBG("Section header %u/%u [%u != %u] mismatch.\n",
+                        sect_entry_idx + 1, hdr_info->hdr_32.shnum,
+                        sect_entry_size_32, hdr_info->hdr_32.shentsize);
+                free(sect_entry_32);
+                free(sect_entry);
+                return 0;
+            }
+
+            res = fread(&sect_entry_32[sect_entry_idx],
+                    hdr_info->hdr_32.shentsize, 1, f);
+            if (res == 1)
+            {
+                sect_entry[sect_entry_idx].name =
+                        sect_entry_32[sect_entry_idx].name;
+                sect_entry[sect_entry_idx].type =
+                        (uint64_t) sect_entry_32[sect_entry_idx].type;
+                sect_entry[sect_entry_idx].flags =
+                        sect_entry_32[sect_entry_idx].flags;
+                sect_entry[sect_entry_idx].addr =
+                        (uint64_t) sect_entry_32[sect_entry_idx].addr;
+                sect_entry[sect_entry_idx].offset =
+                        (uint64_t) sect_entry_32[sect_entry_idx].offset;
+                sect_entry[sect_entry_idx].size =
+                        sect_entry_32[sect_entry_idx].size;
+                memcpy(sect_entry[sect_entry_idx].misc,
+                        sect_entry_32[sect_entry_idx].misc,
+                        16 * sizeof(uint8_t));
+            }
+        }
 
         if (res == 1)
         {
@@ -477,7 +644,8 @@ void libbootimg_read_cmdline(struct boot_img_hdr *hdr, struct boot_img_elf_info 
         cmdline_start_pos = elf_info->prog[ELF_PROG_CMD].offset;
         elf_info->cmdline_size = elf_info->prog[ELF_PROG_CMD].size;
     }
-    else if (elf_info->elf_version == VER_ELF_2)
+    else if (elf_info->elf_version == VER_ELF_2 ||
+            elf_info->elf_version == VER_ELF_4)
     {
         cmdline_start_pos = elf_info->sect[ELF_SECT_CMD].offset;
         elf_info->cmdline_size = elf_info->sect[ELF_SECT_CMD].size;
@@ -493,7 +661,8 @@ void libbootimg_read_cmdline(struct boot_img_hdr *hdr, struct boot_img_elf_info 
     fseek(f, cmdline_start_pos, SEEK_SET);
 
     int buf_idx;
-    if (elf_info->elf_version == VER_ELF_2)
+    if (elf_info->elf_version == VER_ELF_2 ||
+            elf_info->elf_version == VER_ELF_4)
     {
         elf_info->cmdline_metadata_cnt = 8;
         if (fread(elf_info->cmdline_metadata, 8, 1, f) != 1)
@@ -544,7 +713,8 @@ struct boot_img_elf_prog_hdr* get_elf_proc_hdr_of(struct boot_img_elf_info *elf_
             }
             break;
         case LIBBOOTIMG_BLOB_DTB:
-            if (elf_info->elf_version == VER_ELF_2)
+            if (elf_info->elf_version == VER_ELF_2 ||
+                    elf_info->elf_version == VER_ELF_4)
             {
                 return &elf_info->prog[ELF_PROG_RPM];
             }
@@ -625,6 +795,78 @@ int libbootimg_update_headers(struct bootimg *b)
             b->hdr_info->hdr.shoff = addr;
         }
 
+        // Update 32 bits structures
+        if (b->hdr_info->elf_architecture != ARCH_64_BITS)
+        {
+            // Update boot_img_elf_hdr_32
+            memcpy(b->hdr_info->hdr_32.magic, b->hdr_info->hdr.magic,
+                    8 * sizeof(uint8_t));
+            memcpy(b->hdr_info->hdr_32.unused, b->hdr_info->hdr.unused,
+                    8 * sizeof(uint8_t));
+            b->hdr_info->hdr_32.type = b->hdr_info->hdr.type;
+            b->hdr_info->hdr_32.machine = b->hdr_info->hdr.machine;
+            b->hdr_info->hdr_32.version = b->hdr_info->hdr.version;
+            b->hdr_info->hdr_32.entry_addr =
+                    (uint32_t) b->hdr_info->hdr.entry_addr;
+            b->hdr_info->hdr_32.phoff =
+                    (uint32_t) b->hdr_info->hdr.phoff;
+            b->hdr_info->hdr_32.shoff =
+                    (uint32_t) b->hdr_info->hdr.shoff;
+            b->hdr_info->hdr_32.flags = b->hdr_info->hdr.flags;
+            b->hdr_info->hdr_32.ehsize = b->hdr_info->hdr.ehsize;
+            b->hdr_info->hdr_32.phentsize = b->hdr_info->hdr.phentsize;
+            b->hdr_info->hdr_32.phnum = b->hdr_info->hdr.phnum;
+            b->hdr_info->hdr_32.shentsize = b->hdr_info->hdr.shentsize;
+            b->hdr_info->hdr_32.shnum = b->hdr_info->hdr.shnum;
+            b->hdr_info->hdr_32.shstrndx = b->hdr_info->hdr.shstrndx;
+
+            // Update boot_img_elf_prog_hdr_32
+            int prog_entry_idx = 0;
+            for (; prog_entry_idx < b->hdr_info->hdr.phnum; ++prog_entry_idx)
+            {
+                LOG_DBG("Syncing program header 32bits entry %d/%d.\n",
+                        prog_entry_idx + 1, b->hdr_info->hdr_32.phnum);
+                b->hdr_info->prog_32[prog_entry_idx].type =
+                        (uint32_t) b->hdr_info->prog[prog_entry_idx].type;
+                b->hdr_info->prog_32[prog_entry_idx].offset =
+                        (uint32_t) b->hdr_info->prog[prog_entry_idx].offset;
+                b->hdr_info->prog_32[prog_entry_idx].vaddr =
+                        (uint32_t) b->hdr_info->prog[prog_entry_idx].vaddr;
+                b->hdr_info->prog_32[prog_entry_idx].paddr =
+                        (uint32_t) b->hdr_info->prog[prog_entry_idx].paddr;
+                b->hdr_info->prog_32[prog_entry_idx].size =
+                        (uint32_t) b->hdr_info->prog[prog_entry_idx].size;
+                b->hdr_info->prog_32[prog_entry_idx].msize =
+                        (uint32_t) b->hdr_info->prog[prog_entry_idx].msize;
+                b->hdr_info->prog_32[prog_entry_idx].flags =
+                        b->hdr_info->prog[prog_entry_idx].flags;
+                b->hdr_info->prog_32[prog_entry_idx].align =
+                        b->hdr_info->prog[prog_entry_idx].align;
+            }
+
+            // Update boot_img_elf_sect_hdr_32
+            sect_entry_idx = 0;
+            for (; sect_entry_idx < b->hdr_info->hdr.shnum; ++sect_entry_idx)
+            {
+                LOG_DBG("Syncing section header 32bits entry %d/%d.\n",
+                        sect_entry_idx + 1, b->hdr_info->hdr_32.shnum);
+                b->hdr_info->sect_32[sect_entry_idx].name =
+                        b->hdr_info->sect[sect_entry_idx].name;
+                b->hdr_info->sect_32[sect_entry_idx].type =
+                        (uint32_t) b->hdr_info->sect[sect_entry_idx].type;
+                b->hdr_info->sect_32[sect_entry_idx].flags =
+                        b->hdr_info->sect[sect_entry_idx].flags;
+                b->hdr_info->sect_32[sect_entry_idx].addr =
+                        (uint32_t) b->hdr_info->sect[sect_entry_idx].addr;
+                b->hdr_info->sect_32[sect_entry_idx].offset =
+                        (uint32_t) b->hdr_info->sect[sect_entry_idx].offset;
+                b->hdr_info->sect_32[sect_entry_idx].size =
+                        (uint32_t) b->hdr_info->sect[sect_entry_idx].size;
+                memcpy(b->hdr_info->sect_32[sect_entry_idx].misc,
+                        b->hdr_info->sect[sect_entry_idx].misc,
+                        16 * sizeof(uint8_t));
+            }
+        }
     }
     else if (b->is_elf && b->hdr_info->elf_out_format == OUT_AND)
     {
@@ -812,7 +1054,16 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
     }
     else if (b->is_elf && b->hdr_info->elf_out_format == OUT_ELF)
     {
-        if (fwrite(&b->hdr_info->hdr, sizeof(b->hdr_info->hdr), 1, f) != 1)
+        if (b->hdr_info->elf_architecture == ARCH_64_BITS)
+        {
+            res = fwrite(&b->hdr_info->hdr, sizeof(b->hdr_info->hdr), 1, f);
+        }
+        else
+        {
+            res = fwrite(&b->hdr_info->hdr_32, sizeof(b->hdr_info->hdr_32),
+                    1, f);
+        }
+        if (res != 1)
         {
             goto fail_fwrite;
         }
@@ -823,8 +1074,17 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
         for (; hdr_entry_idx < num_prog_hdr; ++hdr_entry_idx)
         {
             print_elf_prog_hdr_to_log(&b->hdr_info->prog[hdr_entry_idx]);
-            if (fwrite(&b->hdr_info->prog[hdr_entry_idx],
-                    b->hdr_info->hdr.phentsize, 1, f) == 1)
+            if (b->hdr_info->elf_architecture == ARCH_64_BITS)
+            {
+                res = fwrite(&b->hdr_info->prog[hdr_entry_idx],
+                        b->hdr_info->hdr.phentsize, 1, f);
+            }
+            else
+            {
+                res = fwrite(&b->hdr_info->prog_32[hdr_entry_idx],
+                        b->hdr_info->hdr_32.phentsize, 1, f);
+            }
+            if (res == 1)
             {
                 LOG_DBG("Program header %u/%u writing successful.\n",
                         hdr_entry_idx + 1, b->hdr_info->hdr.phnum);
@@ -952,7 +1212,17 @@ int libbootimg_write_img_fileptr(struct bootimg *b, FILE *f)
             // Write the section header
             LOG_DBG("Writing section header.\n");
             fseek(f, b->hdr_info->hdr.shoff, SEEK_SET);
-            if (fwrite(b->hdr_info->sect, b->hdr_info->hdr.shentsize, 1, f) == 1)
+            if (b->hdr_info->elf_architecture == ARCH_64_BITS)
+            {
+                res = fwrite(b->hdr_info->sect,
+                        b->hdr_info->hdr.shentsize, 1, f);
+            }
+            else
+            {
+                res = fwrite(b->hdr_info->sect_32,
+                        b->hdr_info->hdr_32.shentsize, 1, f);
+            }
+            if (res == 1)
             {
                 print_elf_sect_hdr_to_log(&b->hdr_info->sect[ELF_SECT_CMD]);
             }
@@ -1084,9 +1354,9 @@ void print_elf_hdr_to_log(struct boot_img_elf_info* elf_info)
     LOG_DBG("Type                           = %u\n", elf_info->hdr.type);
     LOG_DBG("Machine                        = %u\n", elf_info->hdr.machine);
     LOG_DBG("Version                        = %u\n", elf_info->hdr.version);
-    LOG_DBG("Entry Address                  = %x\n", elf_info->hdr.entry_addr);
-    LOG_DBG("Program Offset                 = %x\n", elf_info->hdr.phoff);
-    LOG_DBG("Section Offset                 = %x\n", elf_info->hdr.shoff);
+    LOG_DBG("Entry Address                  = %"PRIx64"\n", elf_info->hdr.entry_addr);
+    LOG_DBG("Program Offset                 = %"PRIx64"\n", elf_info->hdr.phoff);
+    LOG_DBG("Section Offset                 = %"PRIx64"\n", elf_info->hdr.shoff);
     LOG_DBG("Flags                          = %x\n", elf_info->hdr.flags);
     LOG_DBG("Ehsize                         = %u\n", elf_info->hdr.ehsize);
     LOG_DBG("Program headers size           = %u\n", elf_info->hdr.phentsize);
@@ -1101,12 +1371,12 @@ void print_elf_prog_hdr_to_log(struct boot_img_elf_prog_hdr* elf_prog_hdr)
 {
     (void)elf_prog_hdr;
     LOG_DBG("===== ELF program header content =====\n");
-    LOG_DBG("Type                           = %x\n", elf_prog_hdr->type);
-    LOG_DBG("Offset                         = %x\n", elf_prog_hdr->offset);
-    LOG_DBG("VAddr                          = %x\n", elf_prog_hdr->vaddr);
-    LOG_DBG("PAddr                          = %x\n", elf_prog_hdr->paddr);
-    LOG_DBG("Size                           = %u\n", elf_prog_hdr->size);
-    LOG_DBG("MSize                          = %u\n", elf_prog_hdr->msize);
+    LOG_DBG("Type                           = %"PRIx64"\n", elf_prog_hdr->type);
+    LOG_DBG("Offset                         = %"PRIx64"\n", elf_prog_hdr->offset);
+    LOG_DBG("VAddr                          = %"PRIx64"\n", elf_prog_hdr->vaddr);
+    LOG_DBG("PAddr                          = %"PRIx64"\n", elf_prog_hdr->paddr);
+    LOG_DBG("Size                           = %"PRIu64"\n", elf_prog_hdr->size);
+    LOG_DBG("MSize                          = %"PRIu64"\n", elf_prog_hdr->msize);
     LOG_DBG("Flags                          = %x\n", elf_prog_hdr->flags);
     LOG_DBG("Align                          = %x\n", elf_prog_hdr->align);
     LOG_DBG("======================================\n");
@@ -1117,11 +1387,11 @@ void print_elf_sect_hdr_to_log(struct boot_img_elf_sect_hdr* elf_sect_hdr)
     (void)elf_sect_hdr;
     LOG_DBG("===== ELF section header content =====\n");
     LOG_DBG("Name                           = %x\n", elf_sect_hdr->name);
-    LOG_DBG("Type                           = %x\n", elf_sect_hdr->type);
+    LOG_DBG("Type                           = %"PRIx64"\n", elf_sect_hdr->type);
     LOG_DBG("Flags                          = %x\n", elf_sect_hdr->flags);
-    LOG_DBG("Address                        = %x\n", elf_sect_hdr->addr);
-    LOG_DBG("Offset                         = %x\n", elf_sect_hdr->offset);
-    LOG_DBG("Size                           = %u\n", elf_sect_hdr->size);
+    LOG_DBG("Address                        = %"PRIx64"\n", elf_sect_hdr->addr);
+    LOG_DBG("Offset                         = %"PRIx64"\n", elf_sect_hdr->offset);
+    LOG_DBG("Size                           = %"PRIu64"\n", elf_sect_hdr->size);
     LOG_DBG("======================================\n");
 }
 

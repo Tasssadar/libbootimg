@@ -140,6 +140,15 @@ int libbootimg_load_header(struct boot_img_hdr *hdr, const char *path);
 void libbootimg_get_elf_version(struct boot_img_elf_info *hdr_info);
 
 /**
+ * Reads the image header from the given ELF file and adds the content
+ * to the given structure, adapting 32 bits to 64 bits if needed.
+ * @param hdr_info structure holding the meta-information of the given ELF file
+ * @param f pointer to the file descriptor of the ELF file
+ * @return zero on success or the error code returned by the file operations.
+ */
+int libbootimg_load_elf_header(struct boot_img_elf_info *hdr_info, FILE *f);
+
+/**
  * Reads the program headers from the given ELF file and adds the content
  * of each header to the given structure.
  * @param hdr_info structure holding the meta-information of the given ELF file
