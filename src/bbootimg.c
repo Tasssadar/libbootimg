@@ -294,7 +294,12 @@ static int print_info(const char *path)
     printf ("* image size = %ld bytes (%.2f MB)\n", size, (double)size/0x100000);
     printf ("  page size  = %u bytes\n\n", img.hdr.page_size);
 
-    printf ("* Boot Name = \"%s\"\n\n", name);
+    printf ("* Boot Name = \"%s\" [ ", name);
+    for (i = 0; i < BOOT_NAME_SIZE && name[i] != '\0'; ++i)
+    {
+        printf ("0x%02X ", name[i]);
+    }
+    printf ("]\n\n", name);
 
     printf ("* kernel size       = %u bytes (%.2f MB)\n", img.hdr.kernel_size, (double)img.hdr.kernel_size/0x100000);
     printf ("  ramdisk size      = %u bytes (%.2f MB)\n", img.hdr.ramdisk_size, (double)img.hdr.ramdisk_size/0x100000);
