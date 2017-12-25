@@ -1258,25 +1258,11 @@ int libbootimg_write_img_and_destroy(struct bootimg *b, const char *dest)
 
 uint8_t libbootimg_architecture(void)
 {
-    FILE* cpuinfo;
-    char buffer[100];
+    struct utsname sysinfo;
+    uname(&sysinfo);
 
-    memset(buffer, 0, sizeof(buffer));
-    cpuinfo = fopen("/proc/cpuinfo", "rb");
-
-    if (cpuinfo == NULL)
-    {
-        return ARCH_32_BITS;
-    }
-
-    if (fread(buffer, 1, sizeof(buffer), cpuinfo) == 0)
-    {
-        fclose(cpuinfo);
-        return ARCH_32_BITS;
-    }
-    fclose(cpuinfo);
-
-    if (strstr(buffer, "aarch64")) {
+    if (strstr(sysinfo.machine, "aarch64") ||
+            strstr(sysinfo.machine, "armv8")) {
         return ARCH_64_BITS;
     }
 
