@@ -3,18 +3,25 @@
 
 language: c
 
+os: linux
+dist: bionic
+
 compiler:
   - gcc
   - clang
 
-matrix:
- include:
-   - compiler: i586-mingw32msvc-gcc
+jobs:
+  include:
+    - os: linux
+      dist: trusty
+      compiler: i586-mingw32msvc-gcc
+    - os: osx
+      compiler: clang
 
 script:
- - cd src && make
+  - cd src && make
 
 # Only watch the master
 branches:
- only:
-   - master
+  only:
+    - master
